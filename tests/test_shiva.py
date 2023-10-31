@@ -8,10 +8,13 @@ from shiva import (
     TensorHeader,
     DataPackaging,
     TensorDataTypes,
+    ShivaServer,
     ShivaServerAsync,
     ShivaClientAsync,
 )
 import pydantic as pyd
+import threading as th
+import time
 
 MESSAGES_TO_TEST = [
     # Good simple messages
@@ -115,6 +118,9 @@ class TestShivaMessage:
 
         # receive the tensors headers
         tensors_headers: List[TensorHeader] = []
+        tensor_shapes: List[List[int]] = []
+        tensors: List[np.ndarray] = []
+
         for _ in range(n_tensors):
             # receive a single tensor header
             tensor_header_chunk = buffer[: TensorHeader.pack_size()]
@@ -123,11 +129,9 @@ class TestShivaMessage:
             tensor_header = TensorHeader.unpack(tensor_header_chunk)
             tensors_headers.append(tensor_header)
 
-        # receive the tensors shapes
-        tensor_shapes: List[List[int]] = []
-        for idx, _ in enumerate(range(n_tensors)):
+            # receive the tensors shapes
             # the size of the shape is 4 bytes per dimension
-            shape_size = 4 * tensors_headers[idx].tensor_rank
+            shape_size = 4 * tensor_header.tensor_rank
 
             # receive the shape
             shape_data = buffer[:shape_size]
@@ -135,25 +139,22 @@ class TestShivaMessage:
             shape = DataPackaging.unpack_ints(shape_data)
             tensor_shapes.append(shape)
 
-        # receive the tensors data
-        tensors: List[np.ndarray] = []
+            # receive the tensors data
 
-        for idx, _ in enumerate(range(n_tensors)):
             # the size of the data is the product of the shape elements times the size
             # of the tensor data type (byte-size)
-            bytes_per_element = np.dtype(tensors_headers[idx].tensor_dtype).itemsize
-            expected_data = np.prod(tensor_shapes[idx]) * bytes_per_element
+            bytes_per_element = np.dtype(tensor_header.tensor_dtype).itemsize
+            expected_data = np.prod(shape) * bytes_per_element
 
             # receive the data
-
             data = buffer[:expected_data]
             buffer = buffer[expected_data:]
 
             # convert the data into a numpy array
             t = np.frombuffer(
                 data,
-                dtype=tensors_headers[idx].tensor_dtype,
-            ).reshape(tensor_shapes[idx])
+                dtype=tensor_header.tensor_dtype,
+            ).reshape(shape)
 
             tensors.append(t)
 
@@ -216,3 +217,44 @@ class TestShivaMessage:
         assert response_message == message
 
         await server.close()
+
+    @pytest.mark.parametrize("metadata, tensors, namespace, errors", MESSAGES_TO_TEST)
+    @pytest.mark.asyncio
+    async def test_shiva_message_server_sync(
+        self, metadata, tensors, namespace, errors
+    ):
+        if errors is not None:
+            with pytest.raises(errors):
+                message = ShivaMessage(
+                    metadata=metadata,
+                    tensors=tensors,
+                    namespace=namespace,
+                )
+            return
+        else:
+            message = ShivaMessage(
+                metadata=metadata,
+                tensors=tensors,
+                namespace=namespace,
+            )
+
+        def manage_message(message: ShivaMessage) -> ShivaMessage:
+            return message
+
+        server = ShivaServer(
+            on_new_message_callback=manage_message,
+            on_new_connection=lambda x: print("new connection"),
+            on_connection_lost=lambda x: print("connectionlost"),
+        )
+
+        server.wait_for_connections(forever=False)
+
+        client = await ShivaClientAsync.create_and_connect()
+        client2 = await ShivaClientAsync.create_and_connect()
+
+        response_message = await client.send_message(message)
+
+        assert response_message == message
+        await client.disconnect()
+        await client2.disconnect()
+        server.close()

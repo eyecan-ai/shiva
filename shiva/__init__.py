@@ -11,6 +11,12 @@ import pydantic as pyd
 from asyncio import StreamReader, StreamWriter
 import deepdiff
 from loguru import logger
+import time
+
+
+class ShivaConstants:
+    DEFAULT_PORT = 6174
+    TENSORS_KEY = '__tensors__'
 
 
 class PackableHeader(ABC):
@@ -156,11 +162,13 @@ class GlobalHeader(CustomModel, PackableHeader):
     @classmethod
     def unpack(cls, data):
         elements = struct.unpack(cls.pack_format(), data)
-        print("ELEMENTS", elements)
-        # check the crc
-        crc = elements[-2]
-        if crc != cls._compute_crc(elements[:-2]):
-            raise ValueError("Wrong CRC")
+
+        # check the crc(s)
+        if elements[-2] != cls._compute_crc(elements[:-2]):
+            raise ValueError("Wrong CRC 1")
+
+        if elements[-1] != cls._compute_crc(elements[:-1]):
+            raise ValueError("Wrong CRC 2")
 
         # check if the magic number is correct (if any
         mn = cls.magic_number()
@@ -330,13 +338,14 @@ class ShivaMessage(CustomModel):
     def flush(self) -> List[any]:
         buffer = []
         buffer.append(self.global_header().pack())
-        for tensor_header in self.tensors_headers():
+
+        for tensor_header, tensor_shape, tensor_data in zip(
+            self.tensors_headers(),
+            self.tensors_shapes(),
+            self.tensors_data(),
+        ):
             buffer.append(tensor_header.pack())
-
-        for tensor_shape in self.tensors_shapes():
             buffer.append(DataPackaging.pack_ints(tensor_shape))
-
-        for tensor_data in self.tensors_data():
             buffer.append(tensor_data)
 
         buffer.append(self.metadata_data())
@@ -389,39 +398,37 @@ class ShivaMessage(CustomModel):
 
         # receive the tensors headers
         tensors_headers: List[TensorHeader] = []
+        tensor_shapes: List[List[int]] = []
+        tensors: List[np.ndarray] = []
+
         for _ in range(n_tensors):
             # receive a single tensor header
             data = cls._readexactly(connection, TensorHeader.pack_size())
             tensor_header = TensorHeader.unpack(data)
             tensors_headers.append(tensor_header)
 
-        # receive the tensors shapes
-        tensor_shapes: List[List[int]] = []
-        for idx, _ in enumerate(range(n_tensors)):
+            # receive the tensors shapes
             # the size of the shape is 4 bytes per dimension
-            shape_size = 4 * tensors_headers[idx].tensor_rank
+            shape_size = 4 * tensor_header.tensor_rank
 
             # receive the shape
             data = cls._readexactly(connection, shape_size)
             shape = DataPackaging.unpack_ints(data)
             tensor_shapes.append(shape)
 
-        # receive the tensors data
-        tensors: List[np.ndarray] = []
-
-        for idx, _ in enumerate(range(n_tensors)):
+            # receive the tensors data
             # the size of the data is the product of the shape elements times the size
             # of the tensor data type (byte-size)
-            bytes_per_element = np.dtype(tensors_headers[idx].tensor_dtype).itemsize
-            expected_data = np.prod(tensor_shapes[idx]) * bytes_per_element
+            bytes_per_element = np.dtype(tensor_header.tensor_dtype).itemsize
+            expected_data = np.prod(shape) * bytes_per_element
 
             # receive the data
             data = cls._readexactly(connection, expected_data)
             # convert the data into a numpy array
             t = np.frombuffer(
                 data,
-                dtype=tensors_headers[idx].tensor_dtype,
-            ).reshape(tensor_shapes[idx])
+                dtype=tensor_header.tensor_dtype,
+            ).reshape(shape)
             tensors.append(t)
 
         # receive the metadata if any
@@ -450,17 +457,13 @@ class ShivaMessage(CustomModel):
 
         connection.send(message.global_header().pack())
 
-        # write the tensors headers and drain the buffer
-        for h in message.tensors_headers():
+        for h, s, t in zip(
+            message.tensors_headers(),
+            message.tensors_shapes(),
+            message.tensors,
+        ):
             connection.send(h.pack())
-
-        # write the tensors shapes and drain the buffer
-        for s in message.tensors_shapes():
             connection.send(DataPackaging.pack_ints(s))
-
-        # write the tensors data and drain the buffer. We drain the buffer after each
-        # tensor because they could be a bottleneck in the communication
-        for t in message.tensors:
             connection.send(t.tobytes())
 
         # write the metadata and drain the buffer
@@ -491,31 +494,29 @@ class ShivaMessage(CustomModel):
 
         # receive the tensors headers
         tensors_headers: List[TensorHeader] = []
+        tensor_shapes: List[List[int]] = []
+        tensors: List[np.ndarray] = []
+
         for _ in range(n_tensors):
             # receive a single tensor header
             data = await reader.readexactly(TensorHeader.pack_size())
             tensor_header = TensorHeader.unpack(data)
             tensors_headers.append(tensor_header)
 
-        # receive the tensors shapes
-        tensor_shapes: List[List[int]] = []
-        for idx, _ in enumerate(range(n_tensors)):
+            # # receive the tensors shapes
             # the size of the shape is 4 bytes per dimension
-            shape_size = 4 * tensors_headers[idx].tensor_rank
+            shape_size = 4 * tensor_header.tensor_rank
 
             # receive the shape
             data = await reader.readexactly(shape_size)
             shape = DataPackaging.unpack_ints(data)
             tensor_shapes.append(shape)
 
-        # receive the tensors data
-        tensors: List[np.ndarray] = []
-
-        for idx, _ in enumerate(range(n_tensors)):
+            # receive the tensors data
             # the size of the data is the product of the shape elements times the size
             # of the tensor data type (byte-size)
-            bytes_per_element = np.dtype(tensors_headers[idx].tensor_dtype).itemsize
-            expected_data = np.prod(tensor_shapes[idx]) * bytes_per_element
+            bytes_per_element = np.dtype(tensor_header.tensor_dtype).itemsize
+            expected_data = np.prod(shape) * bytes_per_element
 
             # receive the data
             data = await reader.readexactly(expected_data)
@@ -523,8 +524,8 @@ class ShivaMessage(CustomModel):
             # convert the data into a numpy array
             t = np.frombuffer(
                 data,
-                dtype=tensors_headers[idx].tensor_dtype,
-            ).reshape(tensor_shapes[idx])
+                dtype=tensor_header.tensor_dtype,
+            ).reshape(shape)
 
             tensors.append(t)
 
@@ -562,20 +563,15 @@ class ShivaMessage(CustomModel):
         writer.write(message.global_header().pack())
         await writer.drain()
 
-        # write the tensors headers and drain the buffer
-        for h in message.tensors_headers():
+        for h, s, t in zip(
+            message.tensors_headers(),
+            message.tensors_shapes(),
+            message.tensors,
+        ):
             writer.write(h.pack())
-
-        await writer.drain()
-
-        # write the tensors shapes and drain the buffer
-        for s in message.tensors_shapes():
+            await writer.drain()
             writer.write(DataPackaging.pack_ints(s))
-        await writer.drain()
-
-        # write the tensors data and drain the buffer. We drain the buffer after each
-        # tensor because they could be a bottleneck in the communication
-        for t in message.tensors:
+            await writer.drain()
             writer.write(t.tobytes())
             await writer.drain()
 
@@ -602,12 +598,14 @@ class ShivaServer:
         self._on_connection_lost = on_connection_lost
         self._alive = False
         self._accepting_socket: Optional[socket.socket] = None
+        self._host = None
+        self._port = None
 
     @classmethod
     def _create_accepting_socket(
         cls,
         host: str = "0.0.0.0",
-        port: int = 8000,
+        port: int = ShivaConstants.DEFAULT_PORT,
     ) -> socket.socket:
         # Create a TCP/IP socket
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -620,15 +618,19 @@ class ShivaServer:
     def wait_for_connections(
         self,
         host: str = "0.0.0.0",
-        port: int = 8888,
+        port: int = ShivaConstants.DEFAULT_PORT,
         forever: bool = True,
     ):
+        self._host = host
+        self._port = port
         self._accepting_socket = self._create_accepting_socket(host=host, port=port)
         self._alive = True
+        self._accepting_thread = None
 
         def accept_connections():
-            while self._create_accepting_socket:
+            while self._alive:
                 connection, address = self._accepting_socket.accept()
+                print("Killaccept...")
 
                 self._on_connection_callback(connection, address)
 
@@ -638,8 +640,11 @@ class ShivaServer:
         if forever:
             accept_connections()
         else:
-            thread = threading.Thread(target=accept_connections, daemon=True)
-            thread.start()
+            self._accepting_thread = threading.Thread(
+                target=accept_connections,
+                daemon=True,
+            )
+            self._accepting_thread.start()
 
     def _on_connection_callback(
         self,
@@ -662,9 +667,16 @@ class ShivaServer:
         thread = threading.Thread(target=reading_loop, daemon=True)
         thread.start()
 
-    def close(self):
+    def close(self, wait_time: float = 0.5):
         self._alive = False
-        self._accepting_socket.close()
+        try:
+            # self connect to wakeup accepting socket
+            socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(
+                (self._host, self._port)
+            )
+            time.sleep(wait_time)
+        except Exception as e:
+            logger.warning(e)
 
 
 class ShivaServerAsync:
@@ -683,7 +695,7 @@ class ShivaServerAsync:
     async def wait_for_connections(
         self,
         host: str = "0.0.0.0",
-        port: int = 8888,
+        port: int = ShivaConstants.DEFAULT_PORT,
         forever: bool = True,
     ):
         await self.accept_new_connections(
@@ -726,7 +738,7 @@ class ShivaServerAsync:
         cls,
         on_connection_callback: Callable,
         host: str = "0.0.0.0",
-        port: int = 8888,
+        port: int = ShivaConstants.DEFAULT_PORT,
         forever: bool = True,
     ) -> None:
         async def new_connection(reader, writer):
@@ -759,11 +771,15 @@ class ShivaClientAsync:
             self._port,
         )
 
+    async def disconnect(self):
+        self._writer.close()
+        await self._writer.wait_closed()
+
     @classmethod
     async def create_and_connect(
         cls,
         host: str = "localhost",
-        port: int = 8888,
+        port: int = ShivaConstants.DEFAULT_PORT,
     ) -> ShivaClientAsync:
         client = ShivaClientAsync(host, port)
         await client.connect()

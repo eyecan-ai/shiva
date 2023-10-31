@@ -1,17 +1,20 @@
 #include "nlohmann/json.hpp"
 #include <algorithm>
-#include <arpa/inet.h> /* for sockaddr_in and inet_addr() */
+#include <arpa/inet.h>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
 #include <netinet/tcp.h>
-#include <stdio.h>  /* for printf() and fprintf() */
-#include <stdlib.h> /* for atoi() and exit() */
-#include <string.h> /* for memset() */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <string>
-#include <sys/socket.h> /* for socket(), connect(), send(), and recv() */
+#include <sys/socket.h>
 #include <sys/time.h>
-#include <unistd.h> /* for close() */
+#include <typeindex>
+#include <typeinfo>
+#include <unistd.h>
+#include <unordered_map>
 #define COMMAND_SIZE 32
 typedef uint8_t byte;
 
@@ -55,7 +58,7 @@ struct MessageHeader {
     this->CRC += this->n_tensors;
     this->CRC += this->trail_size;
     this->CRC = this->CRC % 256;
-    this->CRC2 = this->CRC;
+    this->CRC2 = (this->CRC + this->CRC) % 256;
   }
 
   void receiveFromSocket(int sock) {
@@ -68,21 +71,33 @@ struct TensorHeader {
   uint8_t rank = 3;
   uint8_t dtype = 3;
 
-  void receiveFromSocket(int sock) {
+  void receive(int sock) {
     if (recv(sock, this, sizeof(TensorHeader), 0) != sizeof(TensorHeader))
       die("Receive Data Fails!");
   }
 };
 
-class TensorF {
+std::unordered_map<std::type_index, int8_t> TensorTypeMap = {
+    {typeid(float), 1},      {typeid(double), 2},   {typeid(uint8_t), 3},
+    {typeid(int8_t), 4},     {typeid(uint16_t), 5}, {typeid(int16_t), 6},
+    {typeid(uint32_t), 7},   {typeid(int32_t), 8},  {typeid(uint64_t), 9},
+    {typeid(int64_t), 10},   {typeid(double), 11},  {typeid(long double), 12},
+    {typeid(long long), 13}, {typeid(bool), 17},
+};
+
+class BaseTensor {
 public:
-  std::vector<float> data;
   std::vector<int> shape;
+  std::type_index type;
+  TensorHeader header;
+
+  BaseTensor() : type(typeid(float)) {}
+  virtual ~BaseTensor() = default;
 
   TensorHeader getHeader() {
     TensorHeader header;
     header.rank = this->shape.size();
-    header.dtype = 1;
+    header.dtype = TensorTypeMap[type];
     return header;
   }
 
@@ -98,15 +113,9 @@ public:
       die("Send Tensor Size fails!");
   }
 
-  void sendData(int sock) {
-    if (send(sock, &this->data[0], sizeof(float) * this->data.size(), 0) !=
-        sizeof(float) * this->data.size())
-      die("Send Tensor Data fails!");
-  }
-
-  void receiveShape(int sock, int rank) {
+  void receiveShape(int sock) {
     std::vector<int> shape;
-    for (int i = 0; i < rank; i++) {
+    for (int i = 0; i < this->header.rank; i++) {
       int shape_element;
       if (recv(sock, &shape_element, sizeof(int), 0) != sizeof(int))
         die("Receive Data Fails!");
@@ -115,19 +124,39 @@ public:
     this->shape = shape;
   }
 
-  void receiveFromSocket(int sock) {
+  virtual void sendData(int sock) = 0;
+  virtual void receiveData(int sock) = 0;
+};
+typedef std::shared_ptr<BaseTensor> BaseTensorPtr;
+
+template <typename T> class Tensor : public BaseTensor {
+public:
+  std::vector<T> data;
+
+  Tensor() : BaseTensor() { this->type = typeid(T); }
+  ~Tensor() {}
+
+  void debug() { std::cout << this->getHeader().dtype << std::endl; }
+
+  void sendData(int sock) {
+    if (send(sock, &this->data[0], sizeof(T) * this->data.size(), 0) !=
+        sizeof(T) * this->data.size())
+      die("Send Tensor Data fails!");
+  }
+
+  void receiveData(int sock) {
 
     int expected_size = 1;
     // exptected size is product of all shape elements * 4 bytes
     for (int i = 0; i < this->shape.size(); i++) {
       expected_size *= this->shape[i];
     }
-    expected_size *= 4;
+    expected_size *= sizeof(T);
 
-    std::shared_ptr<float> response_array(new float[expected_size],
-                                          std::default_delete<float[]>());
+    std::shared_ptr<T> response_array(new T[expected_size],
+                                      std::default_delete<T[]>());
 
-    float *received_data = response_array.get();
+    T *received_data = response_array.get();
     int received_size = 0;
     while (received_size < expected_size) {
       int remains = expected_size - received_size;
@@ -135,26 +164,126 @@ public:
       received_size += chunk_size;
     }
 
-    this->data = std::vector<float>(response_array.get(),
-                                    response_array.get() + expected_size);
-
-    // delete received_data array
-    // delete[] received_data;
+    this->data = std::vector<T>(response_array.get(),
+                                response_array.get() + expected_size);
   }
 };
+
+std::unordered_map<int8_t, std::type_index> TensorTypeMapInversed = {
+    {1, typeid(Tensor<float>)},
+};
+
+std::variant<Tensor<float> *, Tensor<double> *> buildTensor(int dtype) {
+  if (dtype == 1) {
+    return new Tensor<float>();
+  }
+
+  else if (dtype == 2) {
+    return new Tensor<double>();
+  }
+
+  //   else if (dtype == 3) {
+  //     return Tensor<uint8_t>();
+  //   } else if (dtype == 4) {
+  //     return Tensor<int8_t>();
+  //   } else if (dtype == 5) {
+  //     return Tensor<uint16_t>();
+  //   } else if (dtype == 6) {
+  //     return Tensor<int16_t>();
+  //   } else if (dtype == 7) {
+  //     return Tensor<uint32_t>();
+  //   } else if (dtype == 8) {
+  //     return Tensor<int32_t>();
+  //   } else if (dtype == 9) {
+  //     return Tensor<uint64_t>();
+  //   } else if (dtype == 10) {
+  //     return Tensor<int64_t>();
+  //   } else if (dtype == 11) {
+  //     return Tensor<double>();
+  //   } else if (dtype == 12) {
+  //     return Tensor<long double>();
+
+  //   } else if (dtype == 13) {
+  //     return Tensor<long long>();
+  //   } else if (dtype == 17) {
+  //     return Tensor<bool>();
+  //   }
+
+  else {
+    return new Tensor<float>();
+  }
+}
+// create a typedef which is a variant of Tensor<float> and Tensor<uint8_t>
+typedef std::variant<Tensor<float>, Tensor<uint8_t>> TensorVariant;
 
 class Message {
 public:
   nlohmann::json metadata;
   std::string command;
-  std::vector<TensorF> tensors;
+  std::vector<std::shared_ptr<BaseTensor>> tensors;
   Message() : metadata(nlohmann::json::object()), command(""), tensors() {}
+
+  MessageHeader buildHeader() {
+    MessageHeader header(this->metadata.dump().size(), this->tensors.size(),
+                         this->command.size());
+    return header;
+  }
 
   MessageHeader receiveHeader(int sock) {
     MessageHeader header;
     if (recv(sock, &header, sizeof(MessageHeader), 0) != sizeof(MessageHeader))
       die("Receive Data Fails!");
     return header;
+  }
+
+  TensorHeader receiveTensorHeader(int sock) {
+    TensorHeader header;
+    if (recv(sock, &header, sizeof(TensorHeader), 0) != sizeof(TensorHeader))
+      die("Receive Data Fails!");
+    return header;
+  }
+
+  std::vector<int> receiveTensorShape(int sock, TensorHeader &th) {
+    std::vector<int> shape;
+    for (int i = 0; i < th.rank; i++) {
+      int shape_element;
+      if (recv(sock, &shape_element, sizeof(int), 0) != sizeof(int))
+        die("Receive Data Fails!");
+      shape.push_back(shape_element);
+    }
+    return shape;
+  }
+
+  BaseTensorPtr receiveTensor(int sock, const TensorHeader &th,
+                              const std::vector<int> &shape) {
+
+    BaseTensorPtr tensor;
+    if (th.dtype == 1) {
+      tensor = std::make_shared<Tensor<float>>();
+      tensor->shape = shape;
+      tensor->receiveData(sock);
+    } else if (th.dtype == 3) {
+      tensor = std::make_shared<Tensor<uint8_t>>();
+      tensor->shape = shape;
+      tensor->receiveData(sock);
+    } else {
+      throw std::runtime_error("Unknown dtype " + std::to_string(th.dtype));
+    }
+    return tensor;
+  }
+
+  static Message receive(int sock) {
+    Message returnMessage;
+    MessageHeader returnHeader = returnMessage.receiveHeader(sock);
+
+    for (int i = 0; i < returnHeader.n_tensors; i++) {
+      TensorHeader th = returnMessage.receiveTensorHeader(sock);
+      std::vector<int> shape = returnMessage.receiveTensorShape(sock, th);
+      BaseTensorPtr tensor = returnMessage.receiveTensor(sock, th, shape);
+    }
+    returnMessage.receiveMetadata(sock, returnHeader.metadata_size);
+    returnMessage.receiveCommand(sock, returnHeader.trail_size);
+    return returnMessage;
   }
 
   void receiveMetadata(int sock, int metadata_size) {
@@ -190,8 +319,7 @@ public:
   }
 
   void sendHeader(int sock) {
-    MessageHeader header(this->command.size(), this->tensors.size(),
-                         this->metadata.dump().size());
+    MessageHeader header = this->buildHeader();
     if (send(sock, &header, sizeof(MessageHeader), 0) != sizeof(MessageHeader))
       die("Send Header fails!");
   }
@@ -208,11 +336,22 @@ public:
         this->command.size())
       die("Send Command fails!");
   }
+
+  void sendMessage(int sock) {
+    this->sendHeader(sock);
+    for (int i = 0; i < this->tensors.size(); i++) {
+      this->tensors[i]->sendHeader(sock);
+      this->tensors[i]->sendShape(sock);
+      this->tensors[i]->sendData(sock);
+    }
+    this->sendMetadata(sock);
+    this->sendCommand(sock);
+  }
 };
 
 class ThrowClientExample {
 
-protected:
+public:
   /* Socket parameters */
   int sock;                         /* socket handle */
   struct sockaddr_in echoServAddr;  /* server address */
@@ -220,7 +359,6 @@ protected:
   std::string server_address;       /* Server IP address (dotted quad) */
   unsigned short port;              /* Input Image */
 
-public:
   ThrowClientExample(std::string server_address, unsigned short port) {
 
     this->server_address = server_address;
@@ -270,150 +408,8 @@ public:
 
   Message sendAndReceiveMessage(Message &message) {
 
-    MessageHeader header(message.metadata.dump().size(), message.tensors.size(),
-                         message.command.size());
-
-    std::cout << "Sending" << message.metadata << std::endl;
-    if (send(sock, &header, sizeof(MessageHeader), 0) != sizeof(MessageHeader))
-      die("Send Header fails!");
-
-    for (int i = 0; i < message.tensors.size(); i++) {
-      message.tensors[i].sendHeader(sock);
-    }
-
-    for (int i = 0; i < message.tensors.size(); i++) {
-      message.tensors[i].sendShape(sock);
-    }
-
-    // send tensor data
-    for (int i = 0; i < message.tensors.size(); i++) {
-      message.tensors[i].sendData(sock);
-    }
-
-    // send metadata
-    message.sendMetadata(sock);
-    message.sendCommand(sock);
-
-    // Receive header
-    MessageHeader response_header;
-    response_header.receiveFromSocket(sock);
-
-    std::vector<TensorHeader> tensor_headers;
-    for (int i = 0; i < response_header.n_tensors; i++) {
-      TensorHeader tensor_header;
-      tensor_header.receiveFromSocket(sock);
-      tensor_headers.push_back(tensor_header);
-      std::cout << "Receinvg header" << unsigned(tensor_header.rank)
-                << std::endl;
-    }
-
-    std::vector<std::vector<int>> tensors_shapes;
-    for (int i = 0; i < tensor_headers.size(); i++) {
-      std::vector<int> tensor_shape;
-      for (int j = 0; j < tensor_headers[i].rank; j++) {
-        int shape_element;
-        if (recv(sock, &shape_element, sizeof(int), 0) != sizeof(int))
-          die("Receive Data Fails!");
-        tensor_shape.push_back(shape_element);
-      }
-      tensors_shapes.push_back(tensor_shape);
-      std::cout << "Receinvg Shape" << tensor_shape[0] << std::endl;
-    }
-
-    std::vector<TensorF> tensors;
-    for (int i = 0; i < tensor_headers.size(); i++) {
-      TensorF tensor;
-      tensor.shape = tensors_shapes[i];
-      tensor.receiveFromSocket(sock);
-      tensors.push_back(tensor);
-    }
-
-    Message return_message;
-    return_message.tensors = tensors;
-    return_message.receiveMetadata(sock, response_header.metadata_size);
-    return_message.receiveCommand(sock, response_header.trail_size);
-
-    return return_message;
-  }
-
-  /**
-   * Sends an opencv IMAGE through the socket
-   */
-  std::shared_ptr<uint8_t> sendAndReceiveData(float *array, int height,
-                                              int width, int depth,
-                                              int bytesPerElement,
-                                              std::string command) {
-
-    // Send headr
-    int size = height * width * depth * bytesPerElement;
-
-    nlohmann::json j = {{"currency", "USD"}};
-
-    std::string nms = "gino";
-    std::string last_string = j.dump();
-
-    MessageHeader header(last_string.size(), 2, nms.size());
-    sendHeader(sock, header);
-
-    TensorHeader tensor_header;
-    if (send(sock, &tensor_header, sizeof(TensorHeader), 0) !=
-        sizeof(TensorHeader))
-      die("Send Tensor Header fails!");
-    if (send(sock, &tensor_header, sizeof(TensorHeader), 0) !=
-        sizeof(TensorHeader))
-      die("Send Tensor Header fails!");
-
-    int image_size[3] = {256, 256, 3};
-    if (send(sock, &image_size[0], sizeof(int) * 3, 0) != sizeof(int) * 3)
-      die("Send Image Size fails!");
-
-    int image_size2[3] = {1024, 448, 3};
-    if (send(sock, &image_size2[0], sizeof(int) * 3, 0) != sizeof(int) * 3)
-      die("Send Image Size fails!");
-
-    uint8_t *data_1 = new uint8_t[256 * 256 * 3];
-    uint8_t *data_2 = new uint8_t[1024 * 448 * 3];
-
-    send(sock, &data_1[0], 256 * 256 * 3, 0);
-    send(sock, &data_2[0], 1024 * 448 * 3, 0);
-
-    if (send(sock, last_string.c_str(), last_string.size(), 0) !=
-        last_string.size())
-      die("Send Trail fails!");
-
-    // Send Namespace
-    if (send(sock, nms.c_str(), nms.size(), 0) != nms.size())
-      die("Send Namespace fails!");
-
-    // Receive header
-    MessageHeader response_header;
-    this->receiveHeader(response_header);
-    std::cout << "Received header" << unsigned(response_header.metadata_size)
-              << "," << unsigned(response_header.n_tensors) << ","
-              << unsigned(response_header.trail_size) << std::endl;
-    // response_header.print();
-
-    // Receive raw float/bytes from server
-    int expected_size = response_header.metadata_size;
-    std::cout << "Expected size: " << expected_size << std::endl;
-    std::shared_ptr<uint8_t> response_array(new uint8_t[expected_size],
-                                            std::default_delete<uint8_t[]>());
-
-    uint8_t *received_data = response_array.get();
-    int received_size = 0;
-    while (received_size < expected_size) {
-      int remains = expected_size - received_size;
-      int chunk_size = recv(sock, &(received_data)[received_size], remains, 0);
-      received_size += chunk_size;
-    }
-    // conveert response array to string
-    std::string response_string((char *)response_array.get(), expected_size);
-    std::cout << "Received string: " << response_string << std::endl;
-    // create json from string
-    nlohmann::json response_json = nlohmann::json::parse(response_string);
-    std::cout << "Received json: " << response_json << std::endl;
-    return response_array;
+    message.sendMessage(this->sock);
+    return Message::receive(this->sock);
   }
 };
-
 }; // namespace throwprotocol
