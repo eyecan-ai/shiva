@@ -1,6 +1,6 @@
 # Shiva
 
-<img src='docs/images/logo.jpeg' height=256 />
+<img src='docs/images/logo.jpeg' height=400 width=400 />
 
 
 ### Table of contents
