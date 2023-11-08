@@ -27,11 +27,13 @@ The **Shiva** Message is a binary flow of the following chunks:
 
 Message chunks are made as follows:
 
+> :warning: All integers (**uint32**) in headers are encoded in **big endian** during send and receive.
+
 <img src='docs/images/MessageZoom.png' />
 
 <br>
-> [!WARNING]  
-> All integers (**uint32**) in headers are encoded in **big endian** during send and receive.
+
+> :warning: All integers (**uint32**) in headers are encoded in **big endian** during send and receive.
 
 ## Data
 
