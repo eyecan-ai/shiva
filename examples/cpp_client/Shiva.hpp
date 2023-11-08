@@ -109,10 +109,7 @@ public:
   void sendShape(int sock) {
 
     std::vector<be_uint32_t> beshape =
-        std::vector<be_uint32_t>(this->shape.size());
-    for (int i = 0; i < this->shape.size(); i++) {
-      beshape[i] = this->shape[i];
-    }
+        std::vector<be_uint32_t>(this->shape.begin(), this->shape.end());
 
     if (send(sock, &beshape[0], sizeof(uint32_t) * beshape.size(), 0) !=
         sizeof(uint32_t) * beshape.size())
@@ -203,14 +200,12 @@ class ShivaMessage {
   }
 
   std::vector<uint32_t> receiveTensorShape(int sock, TensorHeader &th) {
-    std::vector<uint32_t> shape;
-    for (int i = 0; i < th.rank; i++) {
-      be_uint32_t shape_element;
-      if (recv(sock, &shape_element, sizeof(be_uint32_t), 0) !=
-          sizeof(be_uint32_t))
-        die("Receive Data Fails!");
-      shape.push_back(shape_element);
-    }
+
+    std::vector<be_uint32_t> beshape(th.rank);
+    if (recv(sock, &beshape[0], sizeof(be_uint32_t) * th.rank, 0) !=
+        sizeof(be_uint32_t) * th.rank)
+      die("Receive Data Fails!");
+    std::vector<uint32_t> shape(beshape.begin(), beshape.end());
     return shape;
   }
 
