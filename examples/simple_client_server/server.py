@@ -1,10 +1,6 @@
 import asyncio
-from typing import Dict
 import shiva as shv
 from loguru import logger
-
-shared_queue_map: Dict[tuple, asyncio.Queue] = {}
-results_queue = asyncio.Queue(1)
 
 
 async def manage_message_async(message: shv.ShivaMessage) -> shv.ShivaMessage:
