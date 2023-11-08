@@ -29,6 +29,10 @@ Message chunks are made as follows:
 
 <img src='docs/images/MessageZoom.png' />
 
+<br>
+> [!WARNING]  
+> All integers (**uint32**) in headers are encoded in **big endian** during send and receive.
+
 ## Data
 
 ### Metadata
