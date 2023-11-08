@@ -11,7 +11,7 @@ void die(std::string errorMessage) {
 }
 
 template <typename DataType>
-std::shared_ptr<Tensor<DataType>> createTensor(std::vector<int> shape,
+std::shared_ptr<Tensor<DataType>> createTensor(std::vector<uint32_t> shape,
                                                int fill_value = 0) {
   int total_size = 1;
   std::for_each(shape.begin(), shape.end(), [&](int n) { total_size *= n; });

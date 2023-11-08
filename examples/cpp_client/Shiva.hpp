@@ -11,6 +11,19 @@
 namespace shiva {
 
 /**
+ * Bigendian uint32_t
+ */
+class be_uint32_t {
+public:
+  be_uint32_t() : be_val_(0) {}
+  be_uint32_t(const uint32_t &val) : be_val_(htonl(val)) {}
+  operator uint32_t() const { return ntohl(be_val_); }
+
+private:
+  uint32_t be_val_;
+} __attribute__((packed));
+
+/**
  * DIEs
  */
 void die(std::string errorMessage) {
@@ -28,7 +41,7 @@ std::unordered_map<std::type_index, int8_t> TensorTypeMap = {
 
 struct MessageHeader {
   uint8_t MAGIC[4];
-  uint32_t metadata_size;
+  be_uint32_t metadata_size;
   uint8_t n_tensors;
   uint8_t trail_size;
   uint8_t CRC;
@@ -73,7 +86,7 @@ struct TensorHeader {
 
 class BaseTensor {
 public:
-  std::vector<int> shape;
+  std::vector<uint32_t> shape;
   std::type_index type;
   TensorHeader header;
 
@@ -94,21 +107,29 @@ public:
   }
 
   void sendShape(int sock) {
-    if (send(sock, &this->shape[0], sizeof(int) * this->shape.size(), 0) !=
-        sizeof(int) * this->shape.size())
+
+    std::vector<be_uint32_t> beshape =
+        std::vector<be_uint32_t>(this->shape.size());
+    for (int i = 0; i < this->shape.size(); i++) {
+      beshape[i] = this->shape[i];
+    }
+
+    if (send(sock, &beshape[0], sizeof(uint32_t) * beshape.size(), 0) !=
+        sizeof(uint32_t) * beshape.size())
       die("Send Tensor Size fails!");
   }
 
-  void receiveShape(int sock) {
-    std::vector<int> shape;
-    for (int i = 0; i < this->header.rank; i++) {
-      int shape_element;
-      if (recv(sock, &shape_element, sizeof(int), 0) != sizeof(int))
-        die("Receive Data Fails!");
-      shape.push_back(shape_element);
-    }
-    this->shape = shape;
-  }
+  // void receiveShape(int sock) {
+  //   std::vector<uint32_t> shape;
+  //   for (int i = 0; i < this->header.rank; i++) {
+  //     be_uint32_t shape_element;
+  //     if (recv(sock, &shape_element, sizeof(be_uint32_t), 0) !=
+  //         sizeof(be_uint32_t))
+  //       die("Receive Data Fails!");
+  //     shape.push_back(shape_element);
+  //   }
+  //   this->shape = shape;
+  // }
 
   virtual void copyData(void *data) = 0;
   virtual void sendData(int sock) = 0;
@@ -181,11 +202,12 @@ class ShivaMessage {
     return header;
   }
 
-  std::vector<int> receiveTensorShape(int sock, TensorHeader &th) {
-    std::vector<int> shape;
+  std::vector<uint32_t> receiveTensorShape(int sock, TensorHeader &th) {
+    std::vector<uint32_t> shape;
     for (int i = 0; i < th.rank; i++) {
-      int shape_element;
-      if (recv(sock, &shape_element, sizeof(int), 0) != sizeof(int))
+      be_uint32_t shape_element;
+      if (recv(sock, &shape_element, sizeof(be_uint32_t), 0) !=
+          sizeof(be_uint32_t))
         die("Receive Data Fails!");
       shape.push_back(shape_element);
     }
@@ -193,7 +215,7 @@ class ShivaMessage {
   }
 
   BaseTensorPtr receiveTensor(int sock, const TensorHeader &th,
-                              const std::vector<int> &shape) {
+                              const std::vector<uint32_t> &shape) {
 
     BaseTensorPtr tensor;
     if (th.dtype == 1) {
@@ -291,7 +313,13 @@ public:
 
     for (int i = 0; i < returnHeader.n_tensors; i++) {
       TensorHeader th = returnMessage.receiveTensorHeader(sock);
-      std::vector<int> shape = returnMessage.receiveTensorShape(sock, th);
+      std::cout << "HERE\n";
+      std::vector<uint32_t> shape = returnMessage.receiveTensorShape(sock, th);
+
+      for (int i = 0; i < shape.size(); i++) {
+        std::cout << shape[i] << " ";
+      }
+
       BaseTensorPtr tensor = returnMessage.receiveTensor(sock, th, shape);
       tensor->header = th;
       tensor->shape = shape;

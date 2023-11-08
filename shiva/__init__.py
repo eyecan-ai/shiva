@@ -102,7 +102,7 @@ class DataPackaging:
         Returns:
             bytes: the corresponding bytes object
         """
-        return struct.pack(f"{len(ints)}i", *ints)
+        return struct.pack(f"!{len(ints)}i", *ints)
 
     @classmethod
     def unpack_ints(cls, data: bytes) -> List[int]:
@@ -118,7 +118,7 @@ class DataPackaging:
         if len(data) % 4 != 0:
             raise ValueError("The length of the data is not divisible by 4")
 
-        return list(struct.unpack(f"{len(data)//4}i", data))
+        return list(struct.unpack(f"!{len(data)//4}i", data))
 
 
 class GlobalHeader(CustomModel, PackableHeader):
@@ -138,7 +138,7 @@ class GlobalHeader(CustomModel, PackableHeader):
 
     @classmethod
     def pack_format(cls) -> str:
-        return "BBBBiBBBB"
+        return "!BBBBiBBBB"
 
     @classmethod
     def magic_number(cls) -> Optional[tuple]:
@@ -235,7 +235,7 @@ class TensorHeader(CustomModel, PackableHeader):
 
     @classmethod
     def pack_format(cls) -> str:
-        return "BB"
+        return "!BB"
 
     @classmethod
     def magic_number(cls) -> Optional[tuple]:
