@@ -23,6 +23,8 @@ The **Shiva** Message is a binary flow of the following chunks:
 
 <img src='docs/images/Message.png'/>
 
+The protocol is based on a 'Send Message / Receive Message' flow. For each message sent from the client, the server will respond synchronously with another message. The format of the message is detailed in the following section, the content of the variable part of the message, i.e., tensors/metadata/namespace, is determined by the business logic and can be any data the application requires.
+
 ### Chunks
 
 Message chunks are made as follows:
