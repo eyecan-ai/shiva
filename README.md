@@ -73,7 +73,7 @@ Each tensor can be a multi-dimensional array of any type. Hence, the tensor has 
 
 For example a (h,w,c) image of 8-bit unsigned integers will have a rank of 3, a shape of [h,w,c] and a type of 3 (uint8).
 
-** Examples
+## Examples
 
 See [Examples](examples/README.md).
 
