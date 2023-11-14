@@ -24,7 +24,7 @@ private:
 } __attribute__((packed));
 
 /**
- * DIEs
+ * DIEs, prints error message and exits
  */
 void die(std::string errorMessage) {
   std::cout << errorMessage << std::endl;
@@ -308,12 +308,7 @@ public:
 
     for (int i = 0; i < returnHeader.n_tensors; i++) {
       TensorHeader th = returnMessage.receiveTensorHeader(sock);
-      std::cout << "HERE\n";
       std::vector<uint32_t> shape = returnMessage.receiveTensorShape(sock, th);
-
-      for (int i = 0; i < shape.size(); i++) {
-        std::cout << shape[i] << " ";
-      }
 
       BaseTensorPtr tensor = returnMessage.receiveTensor(sock, th, shape);
       tensor->header = th;
