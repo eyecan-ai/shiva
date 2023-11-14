@@ -37,6 +37,12 @@ Message chunks are made as follows:
 
 > :warning: All integers (**uint32**) in headers are encoded in **big endian** during send and receive.
 
+#### Magic Number & CRC
+
+The magic number serves as a signal lock; it can be valuable in a byte streaming channel to indicate the start of a message. In the current implementation, the magic number is composed of 4 unsigned bytes: `(6, 66, 11, 1)`.
+
+The double CRC at the end of the header is useful for checking and validating the content of the header. Both CRCs are unsigned bytes, and their values are the sum modulo 256 of the preceding numbers. See [python implementation](https://github.com/eyecan-ai/shiva/blob/f4d29ecc9c97ee5984b8128f20c1e2b3f32a98e4/shiva/__init__.py#L151) for an example
+
 ## Data
 
 ### Metadata
