@@ -5,7 +5,7 @@ import rich
 
 async def example_client():
     # Create an async Shiva client
-    client = await shv.ShivaClientAsync.create_and_connect("localhost")
+    client = await shv.ShivaClientAsync.create_and_connect("10.1.70.50")
 
     # Send message and grab response
     response = await client.send_message(shv.ShivaMessage(namespace='info'))
