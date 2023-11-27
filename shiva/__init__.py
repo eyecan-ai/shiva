@@ -614,6 +614,8 @@ class ShivaMessage(CustomModel):
             data = await reader.readexactly(tail_string_size)
             namespace = data.decode("utf-8")
 
+        logger.debug("Message complete, sending response")
+
         # return the built message
         return ShivaMessage(metadata=metadata, tensors=tensors, namespace=namespace)
 
