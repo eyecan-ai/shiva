@@ -75,7 +75,7 @@ class PackableHeader(ABC):
         garbage data. If the header does not have a magic number, it should return None
 
         Returns:
-            Optional[tuple]: the magic number, e.g. (6, 66)
+            Optional[tuple]: the magic number, e.g. (6, 66, 11, 1)
         """
         raise NotImplementedError
 

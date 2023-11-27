@@ -23,6 +23,8 @@ The **Shiva** Message is a binary flow of the following chunks:
 
 <img src='docs/images/Message.png'/>
 
+The protocol is based on a 'Send Message / Receive Message' flow. For each message sent from the client, the server will respond synchronously with another message. The format of the message is detailed in the following section, the content of the variable part of the message, i.e., tensors/metadata/namespace, is determined by the business logic and can be any data the application requires.
+
 ### Chunks
 
 Message chunks are made as follows:
@@ -34,6 +36,12 @@ Message chunks are made as follows:
 <br>
 
 > :warning: All integers (**uint32**) in headers are encoded in **big endian** during send and receive.
+
+#### Magic Number & CRC
+
+The magic number serves as a signal lock; it can be valuable in a byte streaming channel to indicate the start of a message. In the current implementation, the magic number is composed of 4 unsigned bytes: `(6, 66, 11, 1)`.
+
+The double CRC at the end of the header is useful for checking and validating the content of the header. Both CRCs are unsigned bytes, and their values are the sum modulo 256 of the preceding numbers. See [python implementation](https://github.com/eyecan-ai/shiva/blob/f4d29ecc9c97ee5984b8128f20c1e2b3f32a98e4/shiva/__init__.py#L151) for an example
 
 ## Data
 
