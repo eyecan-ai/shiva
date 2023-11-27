@@ -636,6 +636,7 @@ class ShivaMessage(CustomModel):
         # asyncio to send the data to the other side and let other coroutines to run
         # in parallel
         writer.write(message.global_header().pack())
+        logger.debug(f"Sent -> Global header: {message.global_header()}")
         await writer.drain()
 
         for h, s, t in zip(
@@ -652,10 +653,12 @@ class ShivaMessage(CustomModel):
 
         # write the metadata and drain the buffer
         writer.write(message.metadata_data())
+        logger.debug(f"Sent -> Metadata: {message.metadata_data()}")
         await writer.drain()
 
         # write the namespace and drain the buffer
         writer.write(message.namespace_data())
+        logger.debug(f"Sent -> Namespace: {message.namespace_data()}")
         await writer.drain()
 
 
