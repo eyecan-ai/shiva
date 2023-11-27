@@ -108,74 +108,7 @@ class TestShivaMessage:
             )
 
         buffer = message.flush()
-
-        global_header_chunk = buffer[: GlobalHeader.pack_size()]
-        buffer = buffer[GlobalHeader.pack_size() :]
-        global_header = GlobalHeader.unpack(global_header_chunk)
-
-        metadata_size = global_header.metadata_size
-        n_tensors = global_header.n_tensors
-
-        # receive the tensors headers
-        tensors_headers: List[TensorHeader] = []
-        tensor_shapes: List[List[int]] = []
-        tensors: List[np.ndarray] = []
-
-        for _ in range(n_tensors):
-            # receive a single tensor header
-            tensor_header_chunk = buffer[: TensorHeader.pack_size()]
-            buffer = buffer[TensorHeader.pack_size() :]
-
-            tensor_header = TensorHeader.unpack(tensor_header_chunk)
-            tensors_headers.append(tensor_header)
-
-            # receive the tensors shapes
-            # the size of the shape is 4 bytes per dimension
-            shape_size = 4 * tensor_header.tensor_rank
-
-            # receive the shape
-            shape_data = buffer[:shape_size]
-            buffer = buffer[shape_size:]
-            shape = DataPackaging.unpack_ints(shape_data)
-            tensor_shapes.append(shape)
-
-            # receive the tensors data
-
-            # the size of the data is the product of the shape elements times the size
-            # of the tensor data type (byte-size)
-            bytes_per_element = np.dtype(tensor_header.tensor_dtype).itemsize
-            expected_data = np.prod(shape) * bytes_per_element
-
-            # receive the data
-            data = buffer[:expected_data]
-            buffer = buffer[expected_data:]
-
-            # convert the data into a numpy array
-            t = np.frombuffer(
-                data,
-                dtype=tensor_header.tensor_dtype,
-            ).reshape(shape)
-
-            tensors.append(t)
-
-        # receive the metadata if any
-        metadata = {}
-        if metadata_size > 0:
-            data = buffer[:metadata_size]
-            buffer = buffer[metadata_size:]
-            metadata = json.loads(data.decode("utf-8"))
-
-        namespace = ""
-        if global_header.tail_string_size > 0:
-            data = buffer[: global_header.tail_string_size]
-            namespace = data.decode("utf-8")
-
-        rebuilt_message = ShivaMessage(
-            metadata=metadata,
-            tensors=tensors,
-            namespace=namespace,
-        )
-
+        rebuilt_message = ShivaMessage.parse(buffer)
         assert message == rebuilt_message
 
     @pytest.mark.parametrize("metadata, tensors, namespace, errors", MESSAGES_TO_TEST)
