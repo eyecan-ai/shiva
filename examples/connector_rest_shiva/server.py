@@ -60,8 +60,8 @@ async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
 
     inference = Inference.parse_obj(output.json())
     n_detections = len(inference.detections)
-    # label, score, bbox_2d, pose_3d.
-    columns = 1 + 1 + 5 + 16
+    # label, score, bbox_2d, pose_3d, size_3d
+    columns = 1 + 1 + 5 + 16 + 3
     # -1 if not set
     data_array = np.ones((n_detections, columns), dtype=np.float32) * -1
 
@@ -93,10 +93,7 @@ async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
     for i, det in enumerate(inference.detections):
         data_array[i, 0] = det.label
         data_array[i, 1] = det.score
-        if det.pose_3d:
-            data_array[i, 7:] = np.array(det.pose_3d).flatten()
-        else:
-            logger.warning("pose_3d is None")
+
         if det.bbox_2d:
             data_array[i, 2:7] = np.array(
                 [
@@ -108,12 +105,21 @@ async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
                 ]
             )
         else:
+            # evaluate from 3d pose
             if det.pose_3d:
                 bbox_2d = pose_3d_2_bbox_2d(pose_3d=det.pose_3d, size_3d=det.size_3d)
+
                 data_array[i, 2:7] = np.array(
                     [bbox_2d.x, bbox_2d.y, bbox_2d.w, bbox_2d.h, bbox_2d.angle]
                 )
-            logger.warning("bbox_2d is None")
+            else:
+                logger.warning("No 2D bbox or 3D pose available")
+
+        if det.pose_3d:
+            data_array[i, 7 : 7 + 16] = np.array(det.pose_3d).flatten()
+
+        if det.size_3d:
+            data_array[i, 7 + 16 : 7 + 16 + 3] = np.array(det.size_3d)
     return shv.ShivaMessage(metadata={}, tensors=[data_array], namespace='inference')
 
 
