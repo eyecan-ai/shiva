@@ -21,11 +21,10 @@ classifiers = [
 ]
 dependencies = [
   "pydantic>=1.10.13,<2.0.0",
-  # "eyeflow>=0.0.10",
-  # "calibry",
-  # "opencv-contrib-python>=4.8.1.78",
-  # "opencv-python>=4.8.1.78",
-  # "opencv-python-headless>=4.8.1.78",
+  "numpy",
+  "deepdiff",
+  "loguru",
+  "rich",
 ]
 
 [project.urls]
