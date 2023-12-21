@@ -1,4 +1,5 @@
 import asyncio
+import os
 import typing as t
 
 import numpy as np
@@ -7,6 +8,10 @@ import requests
 from loguru import logger
 
 import shiva as shv
+
+HOST = os.getenv("HOST", "localhost")
+PORT = os.getenv("PORT", 9999)
+CAMERA = os.getenv("CAMERA", "camera")
 
 
 class BoundingBox2D(pyd.BaseModel):
@@ -33,18 +38,8 @@ class Inference(pyd.BaseModel):
 
 
 async def endpoint_info(message: shv.ShivaMessage) -> shv.ShivaMessage:
-    metadata = {
-        'name': 'Shiva Inference Server',
-        'version': '0.0.1',
-    }
-    return shv.ShivaMessage(metadata=metadata, tensors=[])
-
-
-async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
     # searching for available vision pipelines
-    vision_pipelines = requests.get(
-        "http://localhost:9999/vision_pipelines", timeout=10
-    )
+    vision_pipelines = requests.get(f"http://{HOST}:{PORT}/vision_pipelines", timeout=10)
     # check if the request was successful
     if vision_pipelines.status_code != 200:
         msg = "Cannot get vision pipelines"
@@ -54,9 +49,16 @@ async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
     if len(vision_pipelines) == 0:
         msg = "No vision pipelines available"
         raise Exception(msg)
-    # use first camera available
-    camera_name = vision_pipelines[0]
-    output = requests.get(f"http://localhost:9999/inference/{camera_name}", timeout=10)
+    metadata = {
+        "name": "Rest/Shiva Connector",
+        "version": "0.0.1",
+        "vision_pipelines": vision_pipelines,
+    }
+    return shv.ShivaMessage(metadata=metadata, tensors=[])
+
+
+async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
+    output = requests.get(f"http://{HOST}:{PORT}/inference/{CAMERA}", timeout=10)
 
     inference = Inference.parse_obj(output.json())
     n_detections = len(inference.detections)
@@ -64,31 +66,6 @@ async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
     columns = 1 + 1 + 5 + 16 + 3
     # -1 if not set
     data_array = np.ones((n_detections, columns), dtype=np.float32) * -1
-
-    def pose_3d_2_bbox_2d(
-        pose_3d: t.Union[np.ndarray, list],
-        size_3d: t.Optional[t.Union[np.array, list]] = None,
-    ) -> BoundingBox2D:
-        if isinstance(pose_3d, list):
-            pose_3d = np.array(pose_3d)
-        t = pose_3d[:3, 3]
-        w = -1
-        h = -1
-        if size_3d:
-            if isinstance(size_3d, list):
-                size_3d = np.array(size_3d)
-            w, h, _ = size_3d
-        angle = 0
-        # rotate the bbox_3d to get the angle
-        c_rot_w = pose_3d[:3, :3]
-        angle = np.rad2deg(np.arctan2(c_rot_w[1, 0], c_rot_w[0, 0]))
-        return BoundingBox2D(
-            x=t[0],
-            y=t[1],
-            w=w,
-            h=h,
-            angle=angle,
-        )
 
     for i, det in enumerate(inference.detections):
         data_array[i, 0] = det.label
@@ -104,28 +81,19 @@ async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
                     det.bbox_2d.angle,
                 ]
             )
-        else:
-            # evaluate from 3d pose
-            if det.pose_3d:
-                bbox_2d = pose_3d_2_bbox_2d(pose_3d=det.pose_3d, size_3d=det.size_3d)
-
-                data_array[i, 2:7] = np.array(
-                    [bbox_2d.x, bbox_2d.y, bbox_2d.w, bbox_2d.h, bbox_2d.angle]
-                )
-            else:
-                logger.warning("No 2D bbox or 3D pose available")
 
         if det.pose_3d:
             data_array[i, 7 : 7 + 16] = np.array(det.pose_3d).flatten()
 
         if det.size_3d:
             data_array[i, 7 + 16 : 7 + 16 + 3] = np.array(det.size_3d)
-    return shv.ShivaMessage(metadata={}, tensors=[data_array], namespace='inference')
+
+    return shv.ShivaMessage(metadata={}, tensors=[data_array], namespace="inference")
 
 
 ENDPOINTS_MAP = {
-    'info': endpoint_info,
-    'inference': endpoint_inference,
+    "info": endpoint_info,
+    "inference": endpoint_inference,
 }
 
 
@@ -133,7 +101,7 @@ async def manage_message_async(message: shv.ShivaMessage) -> shv.ShivaMessage:
     namespace = message.namespace
     if namespace in ENDPOINTS_MAP:
         return await ENDPOINTS_MAP[namespace](message)
-    return shv.ShivaMessage(metadata={}, tensors=[], namespace='error')
+    return shv.ShivaMessage(metadata={}, tensors=[], namespace="error")
 
 
 async def main_async():
@@ -150,4 +118,5 @@ async def main_async():
 
 
 if __name__ == "__main__":
+    logger.info(f"Starting Shiva Server on {HOST}:{PORT} with {CAMERA}")
     asyncio.run(main_async())

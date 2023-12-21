@@ -1,15 +1,20 @@
 # Rest-Shiva Connector Demo
 
-In this example we will show a connector bridge from a possible rest api server to a shiva client. The client uses the **namespace** field of the message to specify the **command** to be executed. For example:
+In this example we will show a connector bridge from an already running rest api server to a shiva client. The client uses the **namespace** field of the message to specify the **command** to be executed. For example:
 
 * **INFO**: will return the information of the server.
 * **INFERENCE**: will return the result of the inference.
 * **BAD**: will represent an unknown command and the server will return an error.
 
-To run the example, first start the server:
+To run the example, first start your server connector:
 
 ```bash
 python server.py
+```
+
+To change host and port you can set the env variables:
+```bash
+HOST=localhost PORT=9999 python server.py
 ```
 
 Then, in another terminal, run the client:
@@ -22,7 +27,7 @@ You should see this output:
 
 ```bash
 INFO
-{'name': 'Shiva Inference Server', 'version': '0.0.1'}
+{'name': 'Rest/Shiva Connector', 'version': '0.0.1', 'vision_pipelines': ['camera']}
 
 INFERENCE
 ShivaMessage(
