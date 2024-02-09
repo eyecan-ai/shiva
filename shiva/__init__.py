@@ -6,7 +6,7 @@ import socket
 import struct
 import threading
 import time
-from abc import ABC, abstractclassmethod, abstractmethod
+from abc import ABC, abstractmethod
 from asyncio import StreamReader, StreamWriter
 from typing import Callable, List, Mapping, Optional, Sequence, Union
 
@@ -35,7 +35,7 @@ class PackableHeader(ABC):
         raise NotImplementedError
 
     @classmethod
-    @abstractclassmethod
+    @abstractmethod
     def unpack(cls, data) -> PackableHeader:
         """
         Unpacks the header from a bytes object and returns a new instance of the
@@ -44,7 +44,7 @@ class PackableHeader(ABC):
         raise NotImplementedError
 
     @classmethod
-    @abstractclassmethod
+    @abstractmethod
     def pack_format(cls) -> str:
         """
         Returns the format string for the struct module. For example,
@@ -68,7 +68,7 @@ class PackableHeader(ABC):
         return struct.Struct(cls.pack_format()).size
 
     @classmethod
-    @abstractclassmethod
+    @abstractmethod
     def magic_number(cls) -> Optional[tuple]:
         """
         Some headers may have a magic number, which is a tuple of bytes that is
