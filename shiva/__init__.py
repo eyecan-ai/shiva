@@ -1,22 +1,24 @@
 from __future__ import annotations
+
 import asyncio
 import json
 import socket
 import struct
-from abc import ABC, abstractmethod, abstractclassmethod
 import threading
-from typing import Callable, List, Optional
+import time
+from abc import ABC, abstractclassmethod, abstractmethod
+from asyncio import StreamReader, StreamWriter
+from typing import Any, Callable, List, Mapping, Optional, Sequence, Union
+
+import deepdiff
 import numpy as np
 import pydantic as pyd
-from asyncio import StreamReader, StreamWriter
-import deepdiff
 from loguru import logger
-import time
 
 
 class ShivaConstants:
     DEFAULT_PORT = 6174
-    TENSORS_KEY = '__tensors__'
+    TENSORS_KEY = "__tensors__"
 
 
 class PackableHeader(ABC):
@@ -256,6 +258,48 @@ class TensorHeader(CustomModel, PackableHeader):
             tensor_rank=tensor_rank,
             tensor_dtype=TensorDataTypes.DTYPE_2_NUMPY[tensor_dtype],
         )
+
+
+class ShivaTemplate(CustomModel):
+    def to_shiva_message(self) -> ShivaMessage:
+        def parse(d: Mapping, tensor_start: int = 0) -> tuple[dict, list]:
+            metadata = {}
+            tensors = []
+
+            tidx = tensor_start
+
+            for k, v in d.items():
+                if isinstance(v, Union[int, float, str, bool]):
+                    metadata[k] = v
+                elif isinstance(v, Mapping):
+                    metadata[k], t = parse(v, tidx)
+                    tensors.extend(t)
+                    tidx += len(t)
+                elif isinstance(v, Sequence):
+                    ms = []
+                    for i in range(len(v)):
+                        m, t = parse({"@": v[i]}, tidx)
+                        ms.append(m["@"])
+                        tensors.extend(t)
+                        tidx += len(t)
+                    metadata[k] = ms
+                elif isinstance(v, np.ndarray):
+                    tensors.append(v)
+                    metadata[k] = f"__tensor__{tidx}"
+                    tidx += 1
+                else:
+                    msg = f"Unsupported type {type(v)}"
+                    raise ValueError(msg)
+
+            return metadata, tensors
+
+        m, t = parse(self.dict())
+
+        return ShivaMessage(metadata=m, tensors=t)
+
+    @classmethod
+    def from_shiva_message(cls, message: ShivaMessage) -> ShivaTemplate:
+        raise NotImplementedError
 
 
 class ShivaMessage(CustomModel):
