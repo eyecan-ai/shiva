@@ -8,7 +8,7 @@ import threading
 import time
 from abc import ABC, abstractclassmethod, abstractmethod
 from asyncio import StreamReader, StreamWriter
-from typing import Any, Callable, List, Mapping, Optional, Sequence, Union
+from typing import Callable, List, Mapping, Optional, Sequence, Union
 
 import deepdiff
 import numpy as np
