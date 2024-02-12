@@ -8,6 +8,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from asyncio import StreamReader, StreamWriter
+from collections import OrderedDict
 from typing import Callable, ClassVar, List, Mapping, Optional, Sequence, TypeVar
 
 import deepdiff
@@ -264,13 +265,13 @@ TShivaBridge = TypeVar("TShivaBridge", bound="ShivaBridge")
 
 
 class ShivaBridge(ABC, CustomModel):
-    """Bridge between Pydantic model and Shiva message.
+    """Bridge between Pydantic models and Shiva messages.
 
     This class is used to convert a Pydantic model into a Shiva message and vice versa.
     The schema of the model is saved into the metadata of the Shiva message. The values
     with primitive types and strings are also saved directly into the metadata, while
-    tensors (i.e. numpy arrays) are saved into the tensors list of the Shiva message and
-    a special placeholder is used to reference the tensor in the metadata.
+    tensors (i.e., numpy arrays) are saved into the tensors list of the Shiva message
+    and a special placeholder is used to reference the tensors in the metadata.
 
     Example:
         >>> class MyModel(ShivaBridge):
@@ -278,8 +279,12 @@ class ShivaBridge(ABC, CustomModel):
         ...     age: int
         ...     scores: np.ndarray
         ...
+        ...     def _message_dict(self) -> OrderedDict:
+        ...         # no need to override the default dict in this case
+        ...         return OrderedDict(self.dict())
+        ...
         >>> m = MyModel(name="shiva", age=10, scores=np.random.rand(3, 4))
-        >>> msg = m.to_shiva_message()
+        >>> msg = m.to_shiva_message(namespace="my_shiva_msg")
         >>> print(msg)
         ShivaMessage(
             metadata={'name': 'shiva', 'age': 10, 'scores': '__tensor__0'},
@@ -288,7 +293,7 @@ class ShivaBridge(ABC, CustomModel):
             [0.926789  , 0.20982739, 0.78553886, 0.50265671],
             [0.85282731, 0.66210649, 0.01439065, 0.57840516]])
             ],
-            namespace='',
+            namespace='my_shiva_msg',
             sender=()
         )
         >>> m2 = MyModel.from_shiva_message(msg)
@@ -300,7 +305,21 @@ class ShivaBridge(ABC, CustomModel):
     TENSOR: ClassVar[str] = "__tensor__"
     RECURSION: ClassVar[str] = "__recursion__"
 
-    def to_shiva_message(self) -> ShivaMessage:
+    @abstractmethod
+    def _message_dict(self) -> OrderedDict:
+        """Populate the message dictionary.
+
+        This method is called when building the shiva message to obtain the dict
+        that is converted into metadata and tensors. The main reason behind this
+        method is to use an OrderedDict, so that the tensors inside the message
+        are always in the same order.
+
+        Returns:
+            The dictionary that will be converted in a Shiva message.
+        """
+        raise NotImplementedError
+
+    def to_shiva_message(self, namespace: str = "") -> ShivaMessage:
         """Convert the model into a Shiva message"""
 
         def parse(d: Mapping, tensor_start: int = 0) -> tuple[dict, list]:
@@ -334,9 +353,9 @@ class ShivaBridge(ABC, CustomModel):
 
             return metadata, tensors
 
-        m, t = parse(self.dict())
+        m, t = parse(self._message_dict())
 
-        return ShivaMessage(metadata=m, tensors=t)
+        return ShivaMessage(metadata=m, tensors=t, namespace=namespace)
 
     @classmethod
     def from_shiva_message(cls: type[TShivaBridge], msg: ShivaMessage) -> TShivaBridge:
