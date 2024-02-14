@@ -8,7 +8,6 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from asyncio import StreamReader, StreamWriter
-from collections import OrderedDict
 from typing import Callable, ClassVar, List, Mapping, Optional, Sequence, TypeVar
 
 import deepdiff
