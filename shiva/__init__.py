@@ -279,10 +279,6 @@ class ShivaBridge(ABC, CustomModel):
         ...     age: int
         ...     scores: np.ndarray
         ...
-        ...     def _message_dict(self) -> OrderedDict:
-        ...         # no need to override the default dict in this case
-        ...         return OrderedDict(self.dict())
-        ...
         >>> m = MyModel(name="shiva", age=10, scores=np.random.rand(3, 4))
         >>> msg = m.to_shiva_message(namespace="my_shiva_msg")
         >>> print(msg)
@@ -304,20 +300,6 @@ class ShivaBridge(ABC, CustomModel):
 
     TENSOR: ClassVar[str] = "__tensor__"
     RECURSION: ClassVar[str] = "__recursion__"
-
-    @abstractmethod
-    def _message_dict(self) -> OrderedDict:
-        """Populate the message dictionary.
-
-        This method is called when building the shiva message to obtain the dict
-        that is converted into metadata and tensors. The main reason behind this
-        method is to use an OrderedDict, so that the tensors inside the message
-        are always in the same order.
-
-        Returns:
-            The dictionary that will be converted in a Shiva message.
-        """
-        raise NotImplementedError
 
     def to_shiva_message(self, namespace: str = "") -> ShivaMessage:
         """Convert the model into a Shiva message"""
@@ -348,12 +330,12 @@ class ShivaBridge(ABC, CustomModel):
                     metadata[k] = f"{self.TENSOR}{tidx}"
                     tidx += 1
                 else:
-                    msg = f"Unsupported type {type(v)}"
+                    msg = f"ShivaBridge unsupported type {type(v)}"
                     raise ValueError(msg)
 
             return metadata, tensors
 
-        m, t = parse(self._message_dict())
+        m, t = parse(self.dict())
 
         return ShivaMessage(metadata=m, tensors=t, namespace=namespace)
 
