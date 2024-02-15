@@ -1,22 +1,24 @@
 from __future__ import annotations
+
 import asyncio
 import json
 import socket
 import struct
-from abc import ABC, abstractmethod, abstractclassmethod
 import threading
-from typing import Callable, List, Optional
+import time
+from abc import ABC, abstractmethod
+from asyncio import StreamReader, StreamWriter
+from typing import Callable, ClassVar, List, Mapping, Optional, Sequence, TypeVar
+
+import deepdiff
 import numpy as np
 import pydantic as pyd
-from asyncio import StreamReader, StreamWriter
-import deepdiff
 from loguru import logger
-import time
 
 
 class ShivaConstants:
     DEFAULT_PORT = 6174
-    TENSORS_KEY = '__tensors__'
+    TENSORS_KEY = "__tensors__"
 
 
 class PackableHeader(ABC):
@@ -33,7 +35,7 @@ class PackableHeader(ABC):
         raise NotImplementedError
 
     @classmethod
-    @abstractclassmethod
+    @abstractmethod
     def unpack(cls, data) -> PackableHeader:
         """
         Unpacks the header from a bytes object and returns a new instance of the
@@ -42,7 +44,7 @@ class PackableHeader(ABC):
         raise NotImplementedError
 
     @classmethod
-    @abstractclassmethod
+    @abstractmethod
     def pack_format(cls) -> str:
         """
         Returns the format string for the struct module. For example,
@@ -66,7 +68,7 @@ class PackableHeader(ABC):
         return struct.Struct(cls.pack_format()).size
 
     @classmethod
-    @abstractclassmethod
+    @abstractmethod
     def magic_number(cls) -> Optional[tuple]:
         """
         Some headers may have a magic number, which is a tuple of bytes that is
@@ -256,6 +258,113 @@ class TensorHeader(CustomModel, PackableHeader):
             tensor_rank=tensor_rank,
             tensor_dtype=TensorDataTypes.DTYPE_2_NUMPY[tensor_dtype],
         )
+
+
+TShivaBridge = TypeVar("TShivaBridge", bound="ShivaBridge")
+
+
+class ShivaBridge(ABC, CustomModel):
+    """Bridge between Pydantic models and Shiva messages.
+
+    This class is used to convert a Pydantic model into a Shiva message and vice versa.
+    The schema of the model is saved into the metadata of the Shiva message. The values
+    with primitive types and strings are also saved directly into the metadata, while
+    tensors (i.e., numpy arrays) are saved into the tensors list of the Shiva message
+    and a special placeholder is used to reference the tensors in the metadata.
+
+    Example:
+        >>> class MyModel(ShivaBridge):
+        ...     name: str
+        ...     age: int
+        ...     scores: np.ndarray
+        ...
+        >>> m = MyModel(name="shiva", age=10, scores=np.random.rand(3, 4))
+        >>> msg = m.to_shiva_message(namespace="my_shiva_msg")
+        >>> print(msg)
+        ShivaMessage(
+            metadata={'name': 'shiva', 'age': 10, 'scores': '__tensor__0'},
+            tensors=[
+                array([[0.37199876, 0.61100295, 0.42818011, 0.48479924],
+            [0.926789  , 0.20982739, 0.78553886, 0.50265671],
+            [0.85282731, 0.66210649, 0.01439065, 0.57840516]])
+            ],
+            namespace='my_shiva_msg',
+            sender=()
+        )
+        >>> m2 = MyModel.from_shiva_message(msg)
+        >>> b1, b2 = pickle.dumps(m), pickle.dumps(m2)
+        >>> b1 == b2
+        True
+    """
+
+    TENSOR: ClassVar[str] = "__tensor__"
+    RECURSION: ClassVar[str] = "__recursion__"
+
+    def to_shiva_message(self, namespace: str = "") -> ShivaMessage:
+        """Convert the model into a Shiva message"""
+
+        def parse(d: Mapping, tensor_start: int = 0) -> tuple[dict, list]:
+            metadata = {}
+            tensors = []
+
+            tidx = tensor_start
+
+            for k, v in d.items():
+                if isinstance(v, int | float | str | bool):
+                    metadata[k] = v
+                elif isinstance(v, Mapping):
+                    metadata[k], t = parse(v, tidx)
+                    tensors.extend(t)
+                    tidx += len(t)
+                elif isinstance(v, Sequence):
+                    ms = []
+                    for i in range(len(v)):
+                        m, t = parse({self.RECURSION: v[i]}, tidx)
+                        ms.append(m[self.RECURSION])
+                        tensors.extend(t)
+                        tidx += len(t)
+                    metadata[k] = ms
+                elif isinstance(v, np.ndarray):
+                    tensors.append(v)
+                    metadata[k] = f"{self.TENSOR}{tidx}"
+                    tidx += 1
+                else:
+                    msg = f"ShivaBridge unsupported type {type(v)}"
+                    raise ValueError(msg)
+
+            return metadata, tensors
+
+        m, t = parse(self.dict())
+
+        return ShivaMessage(metadata=m, tensors=t, namespace=namespace)
+
+    @classmethod
+    def from_shiva_message(cls: type[TShivaBridge], msg: ShivaMessage) -> TShivaBridge:
+        """Convert a Shiva message into the model
+
+        Args:
+            msg: the Shiva message.
+
+        Returns:
+            A new instance of the current ShivaBridge subclass.
+        """
+
+        def build(d: dict, tensors: list[np.ndarray]) -> dict:
+            for k, v in d.items():
+                if isinstance(v, dict):
+                    d[k] = build(v, tensors)
+                elif isinstance(v, list):
+                    for i in range(len(v)):
+                        b = build({cls.RECURSION: v[i]}, tensors)
+                        v[i] = b[cls.RECURSION]
+                elif isinstance(v, str):
+                    if v.startswith(cls.TENSOR):
+                        idx = int(v.split(cls.TENSOR)[1])
+                        d[k] = tensors[idx]
+            return d
+
+        obj = build(msg.metadata, msg.tensors)
+        return cls.parse_obj(obj)
 
 
 class ShivaMessage(CustomModel):
