@@ -1,20 +1,44 @@
+import argparse
 import asyncio
-import shiva as shv
+import os
+
 import rich
 
+import shiva as shv
 
-async def example_client():
+STATUS_ID = os.getenv("STATUS_ID", "1234")
+
+
+async def example_client(args: argparse.Namespace):
     # Create an async Shiva client
     client = await shv.ShivaClientAsync.create_and_connect("localhost")
 
     # Send message and grab response
-    response = await client.send_message(shv.ShivaMessage(namespace='info'))
+    response = await client.send_message(shv.ShivaMessage(namespace="info"))
     rich.print("INFO", response.metadata)
-    response = await client.send_message(shv.ShivaMessage(namespace='inference'))
+
+    response = await client.send_message(shv.ShivaMessage(namespace="inference"))
     rich.print("INFERENCE", response)
-    response = await client.send_message(shv.ShivaMessage(namespace='BAD'))
+
+    response = await client.send_message(shv.ShivaMessage(namespace="BAD"))
     rich.print("BAD", response)
 
+    if args.status_id:
 
-if __name__ == '__main__':
-    asyncio.run(example_client())
+        msg = shv.ShivaMessage(
+            namespace="change-format",
+            metadata={"id": f"{args.status_id}"},
+        )
+
+        response = await client.send_message(msg)
+        rich.print("CHANGE FORMAT", response)
+
+
+if __name__ == "__main__":
+
+    # Arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--status_id", type=str)
+    args = parser.parse_args()
+
+    asyncio.run(example_client(args))
