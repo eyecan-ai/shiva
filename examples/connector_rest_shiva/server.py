@@ -39,7 +39,9 @@ class Inference(pyd.BaseModel):
 
 async def endpoint_info(message: shv.ShivaMessage) -> shv.ShivaMessage:
     # searching for available vision pipelines
-    vision_pipelines = requests.get(f"http://{HOST}:{PORT}/vision_pipelines", timeout=10)
+    vision_pipelines = requests.get(
+        f"http://{HOST}:{PORT}/vision_pipelines", timeout=10
+    )
     # check if the request was successful
     if vision_pipelines.status_code != 200:
         msg = "Cannot get vision pipelines"
@@ -91,9 +93,24 @@ async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
     return shv.ShivaMessage(metadata={}, tensors=[data_array], namespace="inference")
 
 
+async def endpoint_changeformat(message: shv.ShivaMessage) -> shv.ShivaMessage:
+    # setting the preferred status
+    status_id = message.metadata["id"]
+    response = requests.post(
+        f"http://{HOST}:{PORT}/settings/preferred_status/activate/{status_id}",
+        timeout=10,
+    )
+    # check if the request was successful
+    if response.status_code != 200:
+        msg = "Something went wrong during format change"
+        raise Exception(msg)
+    return shv.ShivaMessage(metadata={}, tensors=[])
+
+
 ENDPOINTS_MAP = {
     "info": endpoint_info,
     "inference": endpoint_inference,
+    "change-format": endpoint_changeformat,
 }
 
 
