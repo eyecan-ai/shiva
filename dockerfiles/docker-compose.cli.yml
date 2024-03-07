@@ -1,0 +1,7 @@
+name: shiva-cli
+
+services:
+  cli:
+    image: shiva
+    restart: unless-stopped
+    network_mode: host

@@ -75,3 +75,21 @@ with a format like:
         <td>1</td>
     </tr>
 </table>
+
+## :whale2: Docker
+
+To build the image:
+``` console
+cd shiva/
+docker build -f dockerfiles/Dockerfile -t shiva:latest .
+```
+
+To launch the service:
+
+``` console
+docker compose -f dockerfiles/docker-compose.shiva-rest-connector.yml up -d
+```
+
+To override environment variables you can create a  dockerfiles/.env and add the variables
+you want to override.
+
