@@ -1,19 +1,23 @@
 ARG pyver=3.10
 FROM python:${pyver}-slim-bookworm
 
-# opencv requirements
-RUN apt-get update && apt-get install -y git
+# shiva
+RUN apt-get update
 
-RUN python -m pip install --no-cache-dir --upgrade pip
+# install shiva requirements (Examples, etc..)
+COPY ./dockerfiles/docker_requirements.txt /tmp/requirements.txt
+RUN python -m pip install --no-cache-dir --upgrade pip wheel && python -m pip install --no-cache-dir --upgrade -r /tmp/requirements.txt
 
-WORKDIR home/
+# copy shiva code
+RUN mkdir -p /shiva/shiva
+RUN mkdir -p /shiva/examples
+COPY ./pyproject.toml /shiva
+COPY ./README.md /shiva
+COPY ./shiva/. /shiva/shiva
+COPY ./examples/. /shiva/examples
 
-RUN git clone https://github.com/eyecan-ai/shiva.git
-
-RUN python -m pip install --no-cache-dir shiva/. 
-
-# For examples
-RUN python -m pip install requests
+# install shiva
+RUN python -m pip install -e /shiva
 
 # base entry point
 CMD ["bash"]

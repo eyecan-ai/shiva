@@ -93,3 +93,9 @@ docker compose -f dockerfiles/docker-compose.shiva-rest-connector.yml up -d
 To override environment variables you can create a  dockerfiles/.env and add the variables
 you want to override.
 
+If you need to communicate with the host on windows you can set the 
+`EYENODE_API_HOST=host.docker.internal` in the .env and you will also have 
+to remove network_mode: host from the compose file to be able to use the ports info.
+
+ 
+

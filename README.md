@@ -102,5 +102,5 @@ docker build -f dockerfiles/Dockerfile -t shiva:latest .
 To start a CLI session just run the provided compose:
 
 ```console
-docker compose -f dockerfiles/docker-compose.cli.yml run --rm cli
+docker compose -f dockerfiles/docker-compose.cli.yml run --service-ports --rm cli
 ```
