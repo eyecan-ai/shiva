@@ -3,15 +3,20 @@
 <img src='docs/images/logo.jpeg' height=400 width=400 />
 
 
-### Table of contents
+## Table of contents
 
-* [Introduction](#introduction)
-    * [Message](#message)
-    * [Chunks](#chunks)
-* [Data](#data)
-    * [Metadata](#metadata)
-    * [Namespace](#namespace-aka-command)
-    * [Tensor](#tensor)
+- [Shiva](#shiva)
+  - [Table of contents](#table-of-contents)
+  - [Introduction](#introduction)
+    - [Message](#message)
+    - [Chunks](#chunks)
+      - [Magic Number \& CRC](#magic-number--crc)
+  - [Data](#data)
+    - [Metadata](#metadata)
+    - [Namespace (aka. Command)](#namespace-aka-command)
+    - [Tensor](#tensor)
+  - [Examples](#examples)
+  - [:whale2: Docker](#whale2-docker)
 
 
 
@@ -85,3 +90,17 @@ For example a (h,w,c) image of 8-bit unsigned integers will have a rank of 3, a 
 
 See [Examples](examples/README.md).
 
+
+## :whale2: Docker
+
+To build the shiva image:
+``` console
+cd shiva/
+docker build -f dockerfiles/Dockerfile -t shiva:latest .
+```
+
+To start a CLI session just run the provided compose:
+
+```console
+docker compose -f dockerfiles/docker-compose.cli.yml run --service-ports --rm cli
+```

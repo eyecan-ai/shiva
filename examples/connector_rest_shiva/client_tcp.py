@@ -33,7 +33,7 @@ if __name__ == "__main__":
     global_header = bytes.fromhex("06420b0100000022000d8306")
     metadata_data_pre = bytes.fromhex("7b226964223a2022")
     metadata_data_var = [
-        "363563633761393132373533353961313961393531363932",  # kinema
+        "363563633761393132373533353961313961393531363932",  # product
         "363563633761613632373533353961313961393531366439",  # marker
     ]
     metadata_data_post = bytes.fromhex("227d")

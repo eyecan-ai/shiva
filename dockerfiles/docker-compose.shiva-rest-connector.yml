@@ -1,0 +1,19 @@
+name: shiva-rest-connector
+
+services:
+  server:
+    image: shiva
+    working_dir: /shiva/examples/connector_rest_shiva
+    command: "python server.py"
+    restart: unless-stopped
+    # to override the env variables you can set them in a .env file
+    environment:    
+      - HOST=${EYENODE_API_HOST:-localhost}
+      - PORT=${EYENODE_API_PORT:-9999}
+      - CAMERA=${EYENODE_CAMERA_NAME:-camera}
+    network_mode: host
+    ports:
+      # Using long syntax to be compatible with docker compose config --no-interpolate
+      # https://github.com/docker/compose/issues/7964#issuecomment-1810772045
+      - target: 6174
+        published: ${SHIVA_PORT_EXTERNAL:-6174}
