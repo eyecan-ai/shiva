@@ -1,0 +1,13 @@
+name: shiva-cli
+
+services:
+  cli:
+    image: shiva
+    restart: unless-stopped
+    network_mode: host
+    ports:
+      # Using long syntax to be compatible with docker compose config --no-interpolate
+      # https://github.com/docker/compose/issues/7964#issuecomment-1810772045
+      - target: 6174
+        published: ${SHIVA_PORT_EXTERNAL:-6174}
+      
