@@ -66,7 +66,6 @@ Each tensor can be a multi-dimensional array of any type. Hence, the tensor has 
 {
     float16: 0,
     float32: 1,
-    float64: 2,
     uint8: 3,
     int8: 4,
     uint16: 5,

@@ -193,10 +193,12 @@ class TensorDataTypes:
     """
 
     # the dictionary that maps numpy types to the corresponding integer
+    # (np.float64 has been removed because it was overwritten by np.double,
+    # thus the id 2 was never present in the dictionary)
     RAW_NUMPY_2_DTYPE = {
         np.float16: 0,
         np.float32: 1,
-        np.float64: 2,
+        # np.float64: 2,
         np.uint8: 3,
         np.int8: 4,
         np.uint16: 5,
