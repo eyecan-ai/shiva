@@ -221,6 +221,8 @@ class TensorDataTypes:
 
     # create the inverse dictionary
     DTYPE_2_NUMPY = {v: k for k, v in NUMPY_2_DTYPE.items()}
+    # add id=2 for retrocompatibility, since np.float64 has been removed
+    DTYPE_2_NUMPY[2] = np.dtype(np.double).str
 
 
 class TensorHeader(CustomModel, PackableHeader):
@@ -448,7 +450,7 @@ class ShivaMessage(CustomModel):
     def namespace_data(self) -> bytes:
         return self.namespace.encode("utf-8")
 
-    def flush(self) -> List[any]:
+    def flush(self) -> bytes:
         buffer = []
         buffer.append(self.global_header().pack())
 
