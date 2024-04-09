@@ -1,3 +1,4 @@
+import struct
 import threading as th
 from datetime import datetime, timezone
 from typing import Any
@@ -90,8 +91,8 @@ MESSAGES_TO_TEST = [
 
 
 class TestShivaMessage:
-    # create pytest with two parameterized arguments , the first is a dict and the second is
-    # a list of numpy arrays
+    # create pytest with two parameterized arguments, the first is a dict and
+    # the second is a list of numpy arrays
     @pytest.mark.parametrize("metadata, tensors, namespace, errors", MESSAGES_TO_TEST)
     def test_shiva_message(self, metadata, tensors, namespace, errors):
         if errors is not None:
@@ -110,6 +111,45 @@ class TestShivaMessage:
             )
 
         buffer = message.flush()
+        rebuilt_message = ShivaMessage.parse(buffer)
+        assert message == rebuilt_message
+
+    # test if a message containing tensors with type id 2 (np.float64, removed as it was
+    # overwritten by np.double), can be still correctly parsed
+    def test_shiva_message_float64(self):
+        message = ShivaMessage(
+            metadata={"name": "float64test", "age": 16, "pi": 3.14, "success": True},
+            tensors=[np.random.rand(128, 128, 3).astype(np.float64)],
+            namespace="float64test",
+        )
+
+        def custom_flush(message: ShivaMessage) -> bytes:
+            buffer = []
+            buffer.append(message.global_header().pack())
+
+            for tensor_header, tensor_shape, tensor_data in zip(
+                message.tensors_headers(),
+                message.tensors_shapes(),
+                message.tensors_data(),
+            ):
+                # force type id to 2, i.e. the value originally assigned to np.float64
+                buffer.append(
+                    struct.pack(
+                        tensor_header.pack_format(),
+                        tensor_header.tensor_rank,
+                        2,
+                    )
+                )
+                buffer.append(DataPackaging.pack_ints(tensor_shape))
+                buffer.append(tensor_data)
+
+            buffer.append(message.metadata_data())
+            buffer.append(message.namespace_data())
+
+            # buffer is a list of bytes, transform it into a single bytes object
+            return b"".join(buffer)
+
+        buffer = custom_flush(message)
         rebuilt_message = ShivaMessage.parse(buffer)
         assert message == rebuilt_message
 
