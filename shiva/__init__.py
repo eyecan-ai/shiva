@@ -8,7 +8,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from asyncio import StreamReader, StreamWriter
-from typing import Any, Callable, ClassVar, List, Mapping, Optional, Sequence, TypeVar
+from typing import Callable, ClassVar, List, Mapping, Optional, Sequence, TypeVar
 
 import deepdiff
 import numpy as np
@@ -265,16 +265,6 @@ class TensorHeader(CustomModel, PackableHeader):
         )
 
 
-class TensorsList(list[np.ndarray]):
-    def append(self, tensor: Any) -> None:
-        if not isinstance(tensor, np.ndarray):
-            msg = f"TensorsList expecting a numpy array, got {type(tensor)}"
-            raise ValueError(msg)
-        # convert the tensor into big endian
-        be_tensor = tensor.astype(tensor.dtype.newbyteorder(">"))
-        super().append(be_tensor)
-
-
 TShivaBridge = TypeVar("TShivaBridge", bound="ShivaBridge")
 
 
@@ -393,7 +383,7 @@ class ShivaMessage(CustomModel):
     metadata: dict = pyd.Field(default_factory=dict)
 
     # a list of tensors
-    tensors: TensorsList = pyd.Field(default_factory=list)
+    tensors: list[np.ndarray] = pyd.Field(default_factory=list)
 
     # namespace
     namespace: str = pyd.Field(default_factory=str)
@@ -438,10 +428,13 @@ class ShivaMessage(CustomModel):
     def tensors_headers(self) -> List[TensorHeader]:
         """Builds the list of tensor headers"""
 
-        return [
-            TensorHeader(tensor_rank=t.ndim, tensor_dtype=t.dtype.str)
-            for t in self.tensors
-        ]
+        headers = []
+
+        for t in self.tensors:
+            dt = t.dtype.newbyteorder(">").str  # force big endian
+            headers.append(TensorHeader(tensor_rank=t.ndim, tensor_dtype=dt))
+
+        return headers
 
     def tensors_shapes(self) -> List[List[int]]:
         """Returns the list of tensor shapes"""
@@ -450,7 +443,13 @@ class ShivaMessage(CustomModel):
 
     def tensors_data(self) -> List[bytes]:
         """Returns the list of tensors data as list of bytes"""
-        return [t.tobytes() for t in self.tensors]
+        data = []
+
+        for t in self.tensors:
+            be = t.astype(t.dtype.newbyteorder(">"))  # force big endian
+            data.append(be.tobytes())
+
+        return data
 
     def metadata_data(self) -> bytes:
         """Returns the metadata as bytes"""
