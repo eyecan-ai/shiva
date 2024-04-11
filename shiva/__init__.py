@@ -192,15 +192,15 @@ class TensorDataTypes:
     Manifest of the supported tensor data types
     """
 
-    # The dictionary that maps numpy types to the corresponding integer.
-    # Tensors will be stored/send/received as big endian, so the numpy types
-    # are forced to be big endian.
+    # the dictionary that maps numpy types to the corresponding integer
+    # (np.float64 has been removed because it was overwritten by np.double,
+    # thus the id 2 was never present in the dictionary)
     RAW_NUMPY_2_DTYPE: ClassVar = {
         np.dtype(k).newbyteorder(">"): v
         for k, v in [
             (np.float16, 0),
             (np.float32, 1),
-            (np.float64, 2),
+            # (np.float64, 2),
             (np.uint8, 3),
             (np.int8, 4),
             (np.uint16, 5),
@@ -224,6 +224,8 @@ class TensorDataTypes:
 
     # create the inverse dictionary
     DTYPE_2_NUMPY: ClassVar = {v: k for k, v in NUMPY_2_DTYPE.items()}
+    # add id=2 for backwards compatibility, since np.float64 has been removed
+    DTYPE_2_NUMPY[2] = np.dtype(np.double).newbyteorder(">").str
 
 
 class TensorHeader(CustomModel, PackableHeader):
