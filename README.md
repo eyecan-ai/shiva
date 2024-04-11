@@ -34,13 +34,11 @@ The protocol is based on a 'Send Message / Receive Message' flow. For each messa
 
 Message chunks are made as follows:
 
-> :warning: All integers (**uint32**) in headers are encoded in **big endian** during send and receive.
-
 <img src='docs/images/MessageZoom.png' />
 
 <br>
 
-> :warning: All integers (**uint32**) in headers are encoded in **big endian** during send and receive.
+> :warning: All integers (**uint32**) in headers as well as tensors data are encoded in **big endian** during send and receive.
 
 #### Magic Number & CRC
 
