@@ -62,6 +62,10 @@ async def endpoint_info(message: shv.ShivaMessage) -> shv.ShivaMessage:
 async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
     output = requests.get(f"http://{HOST}:{PORT}/inference/{CAMERA}", timeout=10)
 
+    if output.status_code != 200:
+        logger.error(f"Error in inference request: {output.status_code}")
+        return shv.ShivaMessage(metadata={}, tensors=[], namespace="inference")
+
     inference = Inference.parse_obj(output.json())
     n_detections = len(inference.detections)
     # label, score, bbox_2d, pose_3d, size_3d

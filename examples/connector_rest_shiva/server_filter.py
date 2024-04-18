@@ -16,6 +16,7 @@ HEIGHT = int(os.getenv("HEIGHT", "1080"))
 WIDTH = int(os.getenv("WIDTH", "1920"))
 IOU_FILTER_THRESHOLD = float(os.getenv("IOU_FILTER_THRESHOLD", "0.1"))
 FILTER_NON_PICKABLE = os.getenv("FILTER_NON_PICKABLE", "true").lower() == "true"
+EXTRA_CLASS_NAME = os.getenv("EXTRA_CLASS_NAME", "pickable")
 
 
 def check_pickable(
@@ -51,15 +52,17 @@ def check_pickable(
 async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
     output = requests.get(f"http://{HOST}:{PORT}/inference/{CAMERA}", timeout=10)
 
+    if output.status_code != 200:
+        logger.error(f"Error in inference request: {output.status_code}")
+        return shv.ShivaMessage(metadata={}, tensors=[], namespace="inference")
+
     inference = Inference.parse_obj(output.json())
 
     n_detections = len(inference.detections)
-    # label, score, bbox_2d, pose_3d, size_3d
-    columns = 1 + 1 + 5 + 16 + 3
+    # label, score, bbox_2d, pose_3d, size_3d, pickable_flag
+    columns = 1 + 1 + 5 + 16 + 3 + 1
     # -1 if not set
     data_array = np.ones((n_detections, columns), dtype=np.float32) * -1
-    # pickable class extra label
-    pickable_flag = np.ones(n_detections, dtype=bool)
     for i, det in enumerate(inference.detections):
         data_array[i, 0] = det.label
         data_array[i, 1] = det.score
@@ -81,8 +84,8 @@ async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
         if det.size_3d:
             data_array[i, 7 + 16 : 7 + 16 + 3] = np.array(det.size_3d)
 
-        if det.metadata.get("pickable") == 0:
-            pickable_flag[i] = False
+        if EXTRA_CLASS_NAME in det.metadata:
+            data_array[i, -1] = det.metadata.get(EXTRA_CLASS_NAME)
 
     # filter out detections with underthreshold IOU overlap
     if IOU_FILTER_THRESHOLD < 1:
@@ -93,10 +96,10 @@ async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
             f"detections after IOU {IOU_FILTER_THRESHOLD} thresholding: {valid_detections.sum()} / {n_detections}"
         )
         data_array = data_array[valid_detections]
-        pickable_flag = pickable_flag[valid_detections]
 
     # filter out non pickable detections
     if FILTER_NON_PICKABLE:
+        pickable_flag = data_array[:, -1] == 1
         data_array = data_array[pickable_flag]
         logger.info(
             f"detections after non-pickable filter: { len(data_array) } / {valid_detections.sum()}"
