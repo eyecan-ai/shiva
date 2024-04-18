@@ -193,32 +193,39 @@ class TensorDataTypes:
     """
 
     # the dictionary that maps numpy types to the corresponding integer
-    RAW_NUMPY_2_DTYPE = {
-        np.float16: 0,
-        np.float32: 1,
-        np.float64: 2,
-        np.uint8: 3,
-        np.int8: 4,
-        np.uint16: 5,
-        np.int16: 6,
-        np.uint32: 7,
-        np.int32: 8,
-        np.uint64: 9,
-        np.int64: 10,
-        np.double: 11,
-        np.longdouble: 12,
-        np.longlong: 13,
-        np.complex64: 14,
-        np.complex128: 15,
-        np.bool_: 17,
+    # (np.float64 has been removed because it was overwritten by np.double,
+    # thus the id 2 was never present in the dictionary)
+    RAW_NUMPY_2_DTYPE: ClassVar = {
+        np.dtype(k).newbyteorder(">"): v
+        for k, v in [
+            (np.float16, 0),
+            (np.float32, 1),
+            # (np.float64, 2),
+            (np.uint8, 3),
+            (np.int8, 4),
+            (np.uint16, 5),
+            (np.int16, 6),
+            (np.uint32, 7),
+            (np.int32, 8),
+            (np.uint64, 9),
+            (np.int64, 10),
+            (np.double, 11),
+            (np.longdouble, 12),
+            (np.longlong, 13),
+            (np.complex64, 14),
+            (np.complex128, 15),
+            (np.bool_, 17),
+        ]
     }
 
-    # convert the keys of RAW_ NUMPY_2_DTYPE into numpy strings,
-    # e.g. "<f4" instead of "float32"
-    NUMPY_2_DTYPE = {np.dtype(k).str: v for k, v in RAW_NUMPY_2_DTYPE.items()}
+    # convert the keys of RAW_ NUMPY_2_DTYPE into numpy strings
+    # (e.g. ">f4" instead of "float32")
+    NUMPY_2_DTYPE: ClassVar = {k.str: v for k, v in RAW_NUMPY_2_DTYPE.items()}
 
     # create the inverse dictionary
-    DTYPE_2_NUMPY = {v: k for k, v in NUMPY_2_DTYPE.items()}
+    DTYPE_2_NUMPY: ClassVar = {v: k for k, v in NUMPY_2_DTYPE.items()}
+    # add id=2 for backwards compatibility, since np.float64 has been removed
+    DTYPE_2_NUMPY[2] = np.dtype(np.double).newbyteorder(">").str
 
 
 class TensorHeader(CustomModel, PackableHeader):
@@ -231,8 +238,8 @@ class TensorHeader(CustomModel, PackableHeader):
     tensor_rank: int = pyd.Field(ge=0, le=255)
 
     # tensor data type, e.g. float32 or uint8 or int64 etc. It is represented as the
-    # numpy string representation of the data type, e.g. "<f4" is the numpy string
-    # representation of float32, "<u1" is the numpy string representation of uint8 etc.
+    # numpy string representation of the data type, e.g. ">f4" is the numpy string
+    # representation of float32, ">u1" is the numpy string representation of uint8 etc.
     tensor_dtype: str = pyd.Field(...)
 
     @classmethod
@@ -378,7 +385,7 @@ class ShivaMessage(CustomModel):
     metadata: dict = pyd.Field(default_factory=dict)
 
     # a list of tensors
-    tensors: List[np.ndarray] = pyd.Field(default_factory=list)
+    tensors: list[np.ndarray] = pyd.Field(default_factory=list)
 
     # namespace
     namespace: str = pyd.Field(default_factory=str)
@@ -423,10 +430,13 @@ class ShivaMessage(CustomModel):
     def tensors_headers(self) -> List[TensorHeader]:
         """Builds the list of tensor headers"""
 
-        return [
-            TensorHeader(tensor_rank=t.ndim, tensor_dtype=t.dtype.str)
-            for t in self.tensors
-        ]
+        headers = []
+
+        for t in self.tensors:
+            dt = t.dtype.newbyteorder(">").str  # force big endian
+            headers.append(TensorHeader(tensor_rank=t.ndim, tensor_dtype=dt))
+
+        return headers
 
     def tensors_shapes(self) -> List[List[int]]:
         """Returns the list of tensor shapes"""
@@ -435,7 +445,13 @@ class ShivaMessage(CustomModel):
 
     def tensors_data(self) -> List[bytes]:
         """Returns the list of tensors data as list of bytes"""
-        return [t.tobytes() for t in self.tensors]
+        data = []
+
+        for t in self.tensors:
+            be = t.astype(t.dtype.newbyteorder(">"))  # force big endian
+            data.append(be.tobytes())
+
+        return data
 
     def metadata_data(self) -> bytes:
         """Returns the metadata as bytes"""
@@ -446,7 +462,7 @@ class ShivaMessage(CustomModel):
     def namespace_data(self) -> bytes:
         return self.namespace.encode("utf-8")
 
-    def flush(self) -> List[any]:
+    def flush(self) -> bytes:
         buffer = []
         buffer.append(self.global_header().pack())
 
@@ -636,11 +652,11 @@ class ShivaMessage(CustomModel):
         for h, s, t in zip(
             message.tensors_headers(),
             message.tensors_shapes(),
-            message.tensors,
+            message.tensors_data(),
         ):
             connection.send(h.pack())
             connection.send(DataPackaging.pack_ints(s))
-            connection.send(t.tobytes())
+            connection.send(t)
 
         # write the metadata and drain the buffer
         connection.send(message.metadata_data())
@@ -751,13 +767,13 @@ class ShivaMessage(CustomModel):
         for h, s, t in zip(
             message.tensors_headers(),
             message.tensors_shapes(),
-            message.tensors,
+            message.tensors_data(),
         ):
             writer.write(h.pack())
             await writer.drain()
             writer.write(DataPackaging.pack_ints(s))
             await writer.drain()
-            writer.write(t.tobytes())
+            writer.write(t)
             await writer.drain()
 
         # write the metadata and drain the buffer
