@@ -236,18 +236,18 @@ class TestShivaMessage:
 
 
 class TestShivaBridge:
+    class Person(ShivaBridge):
+        name: str
+        age: int
+        height: float
+        married: bool
+        scores: np.ndarray
+        children: list
+        var: list
+
     def test_obj2msg_msg2obj(self):
 
-        class Person(ShivaBridge):
-            name: str
-            age: int
-            height: float
-            married: bool
-            scores: np.ndarray
-            children: list
-            var: list
-
-        person = Person(
+        person = TestShivaBridge.Person(
             name="John",
             age=25,
             height=1.75,
@@ -307,7 +307,7 @@ class TestShivaBridge:
 
         assert msg == expected_msg
 
-        rebuilt_person = Person.from_shiva_message(msg)
+        rebuilt_person = TestShivaBridge.Person.from_shiva_message(msg)
 
         assert person.name == rebuilt_person.name
         assert person.age == rebuilt_person.age
@@ -346,3 +346,45 @@ class TestShivaBridge:
             error_msg = f"ShivaBridge unsupported type {type(obj.unknown)}"
             with pytest.raises(ValueError, match=error_msg):
                 obj.to_shiva_message()
+
+    @pytest.mark.asyncio
+    async def test_native_byteorder(self) -> None:
+
+        def manage_message(message: ShivaMessage) -> ShivaMessage:
+            return message
+
+        server = ShivaServer(
+            on_new_message_callback=manage_message,
+            on_new_connection=lambda x: print("new connection"),
+            on_connection_lost=lambda x: print("connectionlost"),
+        )
+
+        server.wait_for_connections(forever=False)
+
+        client = await ShivaClientAsync.create_and_connect()
+
+        person = TestShivaBridge.Person(
+            name="Alice",
+            age=32,
+            height=1.58,
+            married=True,
+            scores=np.random.rand(2, 3, 8, 9),
+            children=[
+                {
+                    "name": "Bob",
+                    "pics": [np.random.rand(16, 16, 3) for _ in range(3)],
+                },
+            ],
+            var=[],
+        )
+
+        response_message = await client.send_message(person.to_shiva_message())
+        rebuilt_person = TestShivaBridge.Person.from_shiva_message(response_message)
+        rebuilt_tensors = [rebuilt_person.scores, *rebuilt_person.children[0]["pics"]]
+
+        # check that all rebuilt tensors are returned with native byteorder
+        for tensor in rebuilt_tensors:
+            assert tensor.dtype.byteorder == "="
+
+        await client.disconnect()
+        server.close()
