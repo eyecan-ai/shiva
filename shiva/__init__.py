@@ -893,10 +893,14 @@ class ShivaServerAsync:
         on_new_message_callback: Callable[[ShivaMessage], ShivaMessage],
         on_new_connection: Optional[Callable[[tuple], None]] = None,
         on_connection_lost: Optional[Callable[[tuple], None]] = None,
+        on_error_callback: Optional[
+            Callable[[ShivaMessage, Exception], ShivaMessage]
+        ] = None,
     ) -> None:
         self._on_new_message_callback = on_new_message_callback
         self._on_new_connection = on_new_connection
         self._on_connection_lost = on_connection_lost
+        self._on_error_callback = on_error_callback
 
     async def wait_for_connections(
         self,
@@ -938,6 +942,13 @@ class ShivaServerAsync:
                 if self._on_connection_lost is not None:
                     self._on_connection_lost(peername)
                 break
+            except Exception as e:
+                logger.error(f"Error <-> {peername} -> {e}")
+                if self._on_error_callback is not None:
+                    response_message = self._on_error_callback(message, e)
+                else:
+                    response_message = ShivaMessage()
+                await ShivaMessage.send_message_async(writer, response_message)
 
     @classmethod
     async def accept_new_connections(
