@@ -1,7 +1,7 @@
 import struct
 import threading as th
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import pydantic as pyd
@@ -22,7 +22,7 @@ from shiva import (
 MESSAGES_TO_TEST = [
     # Good simple messages
     (
-        {"a": 2, "b": 3.145, "s": "a_String", "l": [1, 2, 34]},
+        {"a": 2, "b": 3.145, "s": "a_String", "l": [1, 2, 34], "d": None},
         [
             np.zeros((128, 128, 3)).astype(x)
             for x in TensorDataTypes.RAW_NUMPY_2_DTYPE.keys()
@@ -244,6 +244,7 @@ class TestShivaBridge:
         scores: np.ndarray
         children: list
         var: list
+        hair: Optional[str]
 
     def test_obj2msg_msg2obj(self):
 
@@ -276,6 +277,7 @@ class TestShivaBridge:
                     },
                 ],
             ],
+            hair=None,
         )
 
         expected_metadata = person.dict()
@@ -289,6 +291,7 @@ class TestShivaBridge:
         expected_metadata["var"][3] = f"{ShivaBridge.TENSOR}{21}"
         expected_metadata["var"][4][0] = f"{ShivaBridge.TENSOR}{22}"
         expected_metadata["var"][4][1]["data"] = f"{ShivaBridge.TENSOR}{23}"
+        expected_metadata["hair"] = "null"
 
         expected_tensors = [person.scores]
         expected_tensors.extend(person.children[0]["pics"])

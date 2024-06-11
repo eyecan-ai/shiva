@@ -317,7 +317,9 @@ class ShivaBridge(ABC, CustomModel):
             tidx = tensor_start
 
             for k, v in d.items():
-                if isinstance(v, (int, float, str, bool)):
+                if v is None:
+                    metadata[k] = "null"
+                elif isinstance(v, (int, float, str, bool)):
                     metadata[k] = v
                 elif isinstance(v, Mapping):
                     metadata[k], t = parse(v, tidx)
@@ -365,6 +367,8 @@ class ShivaBridge(ABC, CustomModel):
                         b = build({cls.RECURSION: v[i]}, tensors)
                         v[i] = b[cls.RECURSION]
                 elif isinstance(v, str):
+                    if v == "null":
+                        d[k] = None
                     if v.startswith(cls.TENSOR):
                         idx = int(v.split(cls.TENSOR)[1])
                         # force native byte order since big endian is not supported
@@ -993,6 +997,8 @@ class ShivaClientAsync:
 
     async def send_message(self, message: ShivaMessage) -> ShivaMessage:
         await ShivaMessage.send_message_async(self._writer, message)
+        print("Sent message")
         responose_message = await ShivaMessage.receive_message_async(self._reader)
+        print("Received response")
         responose_message.sender = self._writer.get_extra_info("peername")
         return responose_message
