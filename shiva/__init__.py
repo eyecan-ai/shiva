@@ -317,7 +317,7 @@ class ShivaBridge(ABC, CustomModel):
             tidx = tensor_start
 
             for k, v in d.items():
-                if isinstance(v, int | float | str | bool):
+                if isinstance(v, (int, float, str, bool)):
                     metadata[k] = v
                 elif isinstance(v, Mapping):
                     metadata[k], t = parse(v, tidx)
