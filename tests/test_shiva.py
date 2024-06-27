@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import struct
 import threading as th
 from datetime import datetime, timezone
@@ -233,6 +235,96 @@ class TestShivaMessage:
         await client.disconnect()
         await client2.disconnect()
         server.close()
+
+    @pytest.mark.parametrize("metadata, tensors, namespace, errors", MESSAGES_TO_TEST)
+    @pytest.mark.parametrize("exception, timeout", [[False, 0], [False, 1], [True, 1]])
+    @pytest.mark.asyncio
+    async def test_server_exception_sync(
+        self, metadata, tensors, namespace, errors, exception, timeout
+    ):
+        if errors is not None:
+            with pytest.raises(errors):
+                message = ShivaMessage(
+                    metadata=metadata,
+                    tensors=tensors,
+                    namespace=namespace,
+                )
+            return
+        else:
+            message = ShivaMessage(
+                metadata=metadata,
+                tensors=tensors,
+                namespace=namespace,
+            )
+
+        def manage_message(message: ShivaMessage) -> ShivaMessage:
+            return ShivaMessage()
+
+        def manage_message_with_errors(message: ShivaMessage) -> ShivaMessage:
+            raise RuntimeError()
+
+        message_callback = manage_message_with_errors if exception else manage_message
+
+        server = ShivaServer(
+            on_new_message_callback=message_callback,
+            on_new_connection=lambda x: print("new connection"),
+            on_connection_lost=lambda x: print("connectionlost"),
+        )
+
+        server.wait_for_connections(forever=False)
+        client = await ShivaClientAsync.create_and_connect()
+
+        if exception:
+            with pytest.raises(asyncio.TimeoutError):
+                _ = await client.send_message(message, timeout=timeout)
+        else:
+            _ = await client.send_message(message, timeout=timeout)
+
+        await client.disconnect()
+        server.close()
+
+    @pytest.mark.parametrize("metadata, tensors, namespace, errors", MESSAGES_TO_TEST)
+    @pytest.mark.parametrize("exception, timeout", [[False, 0], [False, 1], [True, 1]])
+    @pytest.mark.asyncio
+    async def test_server_exception_async(
+        self, metadata, tensors, namespace, errors, exception, timeout
+    ):
+        if errors is not None:
+            with pytest.raises(errors):
+                message = ShivaMessage(
+                    metadata=metadata, tensors=tensors, namespace=namespace
+                )
+            return
+        else:
+            message = ShivaMessage(
+                metadata=metadata, tensors=tensors, namespace=namespace
+            )
+
+        async def manage_message(message: ShivaMessage) -> ShivaMessage:
+            return ShivaMessage()
+
+        async def manage_message_with_errors(message: ShivaMessage) -> ShivaMessage:
+            raise RuntimeError()
+
+        message_callback = manage_message_with_errors if exception else manage_message
+
+        server = ShivaServerAsync(
+            on_new_message_callback=message_callback,
+            on_new_connection=lambda x: print("new connection"),
+            on_connection_lost=lambda x: print("connectionlost"),
+        )
+
+        await server.wait_for_connections(forever=False)
+        client = await ShivaClientAsync.create_and_connect()
+
+        if exception:
+            with pytest.raises(asyncio.TimeoutError):
+                _ = await client.send_message(message, timeout=timeout)
+        else:
+            _ = await client.send_message(message, timeout=timeout)
+
+        await client.disconnect()
+        await server.close()
 
 
 class TestShivaBridge:
