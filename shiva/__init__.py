@@ -1041,8 +1041,8 @@ class ShivaClientAsync:
         self, message: ShivaMessage, timeout: float = 0
     ) -> ShivaMessage:
         await ShivaMessage.send_message_async(self._writer, message)
-        responose_message = await ShivaMessage.receive_message_async(
+        response_message = await ShivaMessage.receive_message_async(
             self._reader, timeout=timeout
         )
-        responose_message.sender = self._writer.get_extra_info("peername")
-        return responose_message
+        response_message.sender = self._writer.get_extra_info("peername")
+        return response_message
