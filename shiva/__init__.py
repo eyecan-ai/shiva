@@ -8,7 +8,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from asyncio import StreamReader, StreamWriter
-from typing import Callable, ClassVar, List, Mapping, Optional, Sequence, TypeVar
+from typing import Any, Callable, ClassVar, Coroutine, Mapping, Optional, Sequence, TypeVar, cast
 
 import deepdiff
 import numpy as np
@@ -95,11 +95,11 @@ class DataPackaging:
     """
 
     @classmethod
-    def pack_ints(cls, ints: List[int]) -> bytes:
+    def pack_ints(cls, ints: list[int]) -> bytes:
         """Packs a list of integers into a bytes object
 
         Args:
-            ints (List[int]):  the list of integers
+            ints (list[int]):  the list of integers
 
         Returns:
             bytes: the corresponding bytes object
@@ -107,18 +107,19 @@ class DataPackaging:
         return struct.pack(f"!{len(ints)}i", *ints)
 
     @classmethod
-    def unpack_ints(cls, data: bytes) -> List[int]:
+    def unpack_ints(cls, data: bytes) -> list[int]:
         """Unpacks a bytes object into a list of integers
 
         Args:
             data (bytes): the bytes object
 
         Returns:
-            List[int]:  the corresponding list of integers
+            list[int]:  the corresponding list of integers
         """
 
         if len(data) % 4 != 0:
-            raise ValueError("The length of the data is not divisible by 4")
+            err = f"The length of the data is not divisible by 4: {len(data)}"
+            raise ValueError(err)
 
         return list(struct.unpack(f"!{len(data)//4}i", data))
 
@@ -151,8 +152,9 @@ class GlobalHeader(CustomModel, PackableHeader):
         return sum(elements) % 256
 
     def pack(self):
+        magic_number = self.magic_number()
         elements = [
-            *(self.magic_number()),
+            *(magic_number if magic_number is not None else []),
             self.metadata_size,
             self.n_tensors,
             self.tail_string_size,
@@ -163,14 +165,16 @@ class GlobalHeader(CustomModel, PackableHeader):
 
     @classmethod
     def unpack(cls, data):
-        elements = struct.unpack(cls.pack_format(), data)
+        elements = cast(list, struct.unpack(cls.pack_format(), data))
 
         # check the crc(s)
         if elements[-2] != cls._compute_crc(elements[:-2]):
-            raise ValueError("Wrong CRC 1")
+            err = f"Wrong CRC 1: {elements[-2]} != {cls._compute_crc(elements[:-2])}"
+            raise ValueError(err)
 
         if elements[-1] != cls._compute_crc(elements[:-1]):
-            raise ValueError("Wrong CRC 2")
+            err = f"Wrong CRC 2: {elements[-1]} != {cls._compute_crc(elements[:-1])}"
+            raise ValueError(err)
 
         # check if the magic number is correct (if any
         mn = cls.magic_number()
@@ -178,7 +182,8 @@ class GlobalHeader(CustomModel, PackableHeader):
             # the first len(mn) elements should be the magic number and should be equal
             # to the magic number of the class
             if elements[: len(mn)] != cls.magic_number():
-                raise ValueError("Wrong magic numbers")
+                err = f"Wrong magic numbers: {elements[: len(mn)]} != {cls.magic_number()}"
+                raise ValueError(err)
 
         return cls(
             metadata_size=elements[4],
@@ -434,7 +439,7 @@ class ShivaMessage(CustomModel):
             tail_string_size=len(self.namespace_data()),
         )
 
-    def tensors_headers(self) -> List[TensorHeader]:
+    def tensors_headers(self) -> list[TensorHeader]:
         """Builds the list of tensor headers"""
 
         headers = []
@@ -445,12 +450,12 @@ class ShivaMessage(CustomModel):
 
         return headers
 
-    def tensors_shapes(self) -> List[List[int]]:
+    def tensors_shapes(self) -> list[list[int]]:
         """Returns the list of tensor shapes"""
 
         return [list(t.shape) for t in self.tensors]
 
-    def tensors_data(self) -> List[bytes]:
+    def tensors_data(self) -> list[bytes]:
         """Returns the list of tensors data as list of bytes"""
         data = []
 
@@ -498,9 +503,9 @@ class ShivaMessage(CustomModel):
         n_tensors = global_header.n_tensors
 
         # receive the tensors headers
-        tensors_headers: List[TensorHeader] = []
-        tensor_shapes: List[List[int]] = []
-        tensors: List[np.ndarray] = []
+        tensors_headers: list[TensorHeader] = []
+        tensor_shapes: list[list[int]] = []
+        tensors: list[np.ndarray] = []
 
         for _ in range(n_tensors):
             # receive a single tensor header
@@ -596,9 +601,9 @@ class ShivaMessage(CustomModel):
         tail_string_size = global_header.tail_string_size
 
         # receive the tensors headers
-        tensors_headers: List[TensorHeader] = []
-        tensor_shapes: List[List[int]] = []
-        tensors: List[np.ndarray] = []
+        tensors_headers: list[TensorHeader] = []
+        tensor_shapes: list[list[int]] = []
+        tensors: list[np.ndarray] = []
 
         for _ in range(n_tensors):
             # receive a single tensor header
@@ -619,7 +624,7 @@ class ShivaMessage(CustomModel):
             # the size of the data is the product of the shape elements times the size
             # of the tensor data type (byte-size)
             bytes_per_element = np.dtype(tensor_header.tensor_dtype).itemsize
-            expected_data = np.prod(shape) * bytes_per_element
+            expected_data = np.prod(shape, dtype=int) * bytes_per_element
 
             # receive the data
             data = cls._readexactly(connection, expected_data)
@@ -693,9 +698,9 @@ class ShivaMessage(CustomModel):
         tail_string_size = global_header.tail_string_size
 
         # receive the tensors headers
-        tensors_headers: List[TensorHeader] = []
-        tensor_shapes: List[List[int]] = []
-        tensors: List[np.ndarray] = []
+        tensors_headers: list[TensorHeader] = []
+        tensor_shapes: list[list[int]] = []
+        tensors: list[np.ndarray] = []
 
         for idx in range(n_tensors):
             # receive a single tensor header
@@ -718,7 +723,7 @@ class ShivaMessage(CustomModel):
             # the size of the data is the product of the shape elements times the size
             # of the tensor data type (byte-size)
             bytes_per_element = np.dtype(tensor_header.tensor_dtype).itemsize
-            expected_data = np.prod(shape) * bytes_per_element
+            expected_data = np.prod(shape, dtype=int) * bytes_per_element
             logger.debug(f"Tensor [{idx}] expected data: {expected_data}")
 
             # receive the data
@@ -838,9 +843,12 @@ class ShivaServer:
         self._accepting_thread = None
 
         def accept_connections():
+            if self._accepting_socket is None:
+                err = "The accepting socket is not initialized"
+                raise ValueError(err)
+
             while self._alive:
                 connection, address = self._accepting_socket.accept()
-                print("Killaccept...")
 
                 self._on_connection_callback(connection, address)
 
@@ -894,7 +902,9 @@ class ShivaServerAsync:
 
     def __init__(
         self,
-        on_new_message_callback: Callable[[ShivaMessage], ShivaMessage],
+        on_new_message_callback: Callable[
+            [ShivaMessage], Coroutine[Any, Any, ShivaMessage]
+        ],
         on_new_connection: Optional[Callable[[tuple], None]] = None,
         on_connection_lost: Optional[Callable[[tuple], None]] = None,
     ) -> None:
@@ -923,7 +933,6 @@ class ShivaServerAsync:
         # peername
         peername = writer.get_extra_info("peername")
 
-        logger.info(f"New connection <- {peername}")
         if self._on_new_connection is not None:
             self._on_new_connection(peername)
 
@@ -938,7 +947,6 @@ class ShivaServerAsync:
 
                 await ShivaMessage.send_message_async(writer, response_message)
             except (asyncio.exceptions.IncompleteReadError, BrokenPipeError):
-                logger.error(f"Connection lost <-> {peername}")
                 if self._on_connection_lost is not None:
                     self._on_connection_lost(peername)
                 break
@@ -982,6 +990,10 @@ class ShivaClientAsync:
         )
 
     async def disconnect(self):
+        if self._writer is None:
+            err = "Can't disconnect, connect the client first."
+            return logger.warning(err)
+
         self._writer.close()
         await self._writer.wait_closed()
 
@@ -996,9 +1008,13 @@ class ShivaClientAsync:
         return client
 
     async def send_message(self, message: ShivaMessage) -> ShivaMessage:
+        if self._writer is None or self._reader is None:
+            err = "Can't send message, connect the client first."
+            raise ValueError(err)
+
         await ShivaMessage.send_message_async(self._writer, message)
-        print("Sent message")
+        logger.trace(f"Message sent: {message}")
         responose_message = await ShivaMessage.receive_message_async(self._reader)
-        print("Received response")
+        logger.trace(f"Message received: {responose_message}")
         responose_message.sender = self._writer.get_extra_info("peername")
         return responose_message
