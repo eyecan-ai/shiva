@@ -5,6 +5,7 @@ import cv2 as cv
 import numpy as np
 import requests
 from loguru import logger
+from requests.exceptions import ConnectTimeout
 from server import Inference, endpoint_changeformat, endpoint_info
 
 import shiva as shv
@@ -50,7 +51,14 @@ def check_pickable(
 
 
 async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
-    output = requests.get(f"http://{HOST}:{PORT}/inference/{CAMERA}", timeout=10)
+    try:
+        output = requests.get(f"http://{HOST}:{PORT}/inference/{CAMERA}", timeout=10)
+    except ConnectTimeout:
+        logger.error(f"Request timeout")
+        return shv.ShivaMessage(metadata={}, tensors=[], namespace="inference")
+    except Exception as e:
+        logger.error(f"Error in inference request: {e}")
+        return shv.ShivaMessage(metadata={}, tensors=[], namespace="inference")
 
     if output.status_code != 200:
         logger.error(f"Error in inference request: {output.status_code}")
@@ -102,7 +110,7 @@ async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
         pickable_flag = data_array[:, -1] == 1
         data_array = data_array[pickable_flag]
         logger.info(
-            f"detections after non-pickable filter: { len(data_array) } / {valid_detections.sum()}"
+            f"detections after non-pickable filter: { len(data_array) } / {n_detections}"
         )
 
     return shv.ShivaMessage(metadata={}, tensors=[data_array], namespace="inference")

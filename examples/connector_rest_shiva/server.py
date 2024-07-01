@@ -6,6 +6,7 @@ import numpy as np
 import pydantic as pyd
 import requests
 from loguru import logger
+from requests.exceptions import ConnectTimeout
 
 import shiva as shv
 
@@ -39,9 +40,17 @@ class Inference(pyd.BaseModel):
 
 async def endpoint_info(message: shv.ShivaMessage) -> shv.ShivaMessage:
     # searching for available vision pipelines
-    vision_pipelines = requests.get(
-        f"http://{HOST}:{PORT}/vision_pipelines", timeout=10
-    )
+    try:
+        vision_pipelines = requests.get(
+            f"http://{HOST}:{PORT}/vision_pipelines", timeout=10
+        )
+    except ConnectTimeout:
+        logger.error(f"Request timeout")
+        return shv.ShivaMessage(metadata={}, tensors=[])
+    except Exception as e:
+        logger.error(f"Error in info request: {e}")
+        return shv.ShivaMessage(metadata={}, tensors=[])
+
     # check if the request was successful
     if vision_pipelines.status_code != 200:
         msg = "Cannot get vision pipelines"
@@ -60,7 +69,14 @@ async def endpoint_info(message: shv.ShivaMessage) -> shv.ShivaMessage:
 
 
 async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
-    output = requests.get(f"http://{HOST}:{PORT}/inference/{CAMERA}", timeout=10)
+    try:
+        output = requests.get(f"http://{HOST}:{PORT}/inference/{CAMERA}", timeout=10)
+    except ConnectTimeout:
+        logger.error(f"Request timeout")
+        return shv.ShivaMessage(metadata={}, tensors=[], namespace="inference")
+    except Exception as e:
+        logger.error(f"Error in inference request: {e}")
+        return shv.ShivaMessage(metadata={}, tensors=[], namespace="inference")
 
     if output.status_code != 200:
         logger.error(f"Error in inference request: {output.status_code}")
@@ -100,10 +116,18 @@ async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
 async def endpoint_changeformat(message: shv.ShivaMessage) -> shv.ShivaMessage:
     # setting the preferred status
     status_id = message.metadata["id"]
-    response = requests.post(
-        f"http://{HOST}:{PORT}/settings/preferred_status/activate/{status_id}",
-        timeout=10,
-    )
+    try:
+        response = requests.post(
+            f"http://{HOST}:{PORT}/settings/preferred_status/activate/{status_id}",
+            timeout=10,
+        )
+    except ConnectTimeout:
+        logger.error(f"Request timeout")
+        return shv.ShivaMessage(metadata={}, tensors=[])
+    except Exception as e:
+        logger.error(f"Error in changeformat request: {e}")
+        return shv.ShivaMessage(metadata={}, tensors=[])
+
     # check if the request was successful
     if response.status_code != 200:
         msg = "Something went wrong during format change"
