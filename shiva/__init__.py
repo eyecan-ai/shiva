@@ -8,7 +8,17 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from asyncio import StreamReader, StreamWriter
-from typing import Any, Callable, ClassVar, Coroutine, Mapping, Optional, Sequence, TypeVar, cast
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    Coroutine,
+    Mapping,
+    Optional,
+    Sequence,
+    TypeVar,
+    cast,
+)
 
 import deepdiff
 import numpy as np
@@ -940,7 +950,6 @@ class ShivaServerAsync:
             try:
                 message = await ShivaMessage.receive_message_async(reader)
 
-                message.sender = peername
                 response_message: ShivaMessage = await self._on_new_message_callback(
                     message
                 )
@@ -950,6 +959,12 @@ class ShivaServerAsync:
                 if self._on_connection_lost is not None:
                     self._on_connection_lost(peername)
                 break
+            except Exception as e:
+                logger.error(e)
+                await ShivaMessage.send_message_async(
+                    writer,
+                    ShivaMessage(namespace="error", metadata={"message": str(e)}),
+                )
 
     @classmethod
     async def accept_new_connections(
