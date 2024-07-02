@@ -9,10 +9,9 @@ import time
 from abc import ABC, abstractmethod
 from asyncio import StreamReader, StreamWriter
 from typing import (
-    Any,
+    Awaitable,
     Callable,
     ClassVar,
-    Coroutine,
     Mapping,
     Optional,
     Sequence,
@@ -687,18 +686,53 @@ class ShivaMessage(CustomModel):
         connection.send(message.namespace_data())
 
     @classmethod
-    async def receive_message_async(cls, reader: StreamReader) -> ShivaMessage:
+    async def _readexactly_async(
+        cls, reader: StreamReader, payload_size: int, timeout: float
+    ) -> bytes:
+        """Reads exactly payload_size bytes from the reader
+
+        Args:
+            reader (StreamReader): the stream reader
+            payload_size (int): the size of the payload
+            timeout (float): the timeout in seconds to wait for the
+            data (only if timeout > 0), if the timeout expires, an
+            asyncio.TimeoutError exception is raised
+
+        Returns:
+            bytes: the payload read from the socket
+
+        Raises:
+            asyncio.TimeoutError: if the timeout expires
+        """
+
+        if timeout > 0:
+            return await asyncio.wait_for(
+                reader.readexactly(payload_size), timeout=timeout
+            )
+        else:
+            return await reader.readexactly(payload_size)
+
+    @classmethod
+    async def receive_message_async(
+        cls, reader: StreamReader, timeout: float = 0
+    ) -> ShivaMessage:
         """Receives a Shiva message from the reader
 
         Args:
             reader (StreamReader): the stream reader
+            timeout (float): the timeout in seconds to wait for the
+            data (only if timeout > 0), if the timeout expires, an
+            asyncio.TimeoutError exception is raised
 
         Returns:
             ShivaMessage: the built Shiva message
+
+        Raises:
+            asyncio.TimeoutError: if the timeout expires
         """
 
         # receive the global header
-        data = await reader.readexactly(GlobalHeader.pack_size())
+        data = await cls._readexactly_async(reader, GlobalHeader.pack_size(), timeout)
         global_header = GlobalHeader.unpack(data)
         logger.debug(f"Global header: {global_header}")
 
@@ -714,7 +748,9 @@ class ShivaMessage(CustomModel):
 
         for idx in range(n_tensors):
             # receive a single tensor header
-            data = await reader.readexactly(TensorHeader.pack_size())
+            data = await cls._readexactly_async(
+                reader, TensorHeader.pack_size(), timeout
+            )
             tensor_header = TensorHeader.unpack(data)
             tensors_headers.append(tensor_header)
             logger.debug(f"Tensor [{idx}] header: {tensor_header}")
@@ -724,7 +760,7 @@ class ShivaMessage(CustomModel):
             shape_size = 4 * tensor_header.tensor_rank
 
             # receive the shape
-            data = await reader.readexactly(shape_size)
+            data = await cls._readexactly_async(reader, shape_size, timeout)
             shape = DataPackaging.unpack_ints(data)
             tensor_shapes.append(shape)
             logger.debug(f"Tensor [{idx}] shape: {shape}")
@@ -737,7 +773,7 @@ class ShivaMessage(CustomModel):
             logger.debug(f"Tensor [{idx}] expected data: {expected_data}")
 
             # receive the data
-            data = await reader.readexactly(expected_data)
+            data = await cls._readexactly_async(reader, expected_data, timeout)
 
             # convert the data into a numpy array
             t = np.frombuffer(
@@ -751,14 +787,14 @@ class ShivaMessage(CustomModel):
         logger.debug(f"Metadata expecting size: {metadata_size}")
         metadata = {}
         if metadata_size > 0:
-            data = await reader.readexactly(metadata_size)
+            data = await cls._readexactly_async(reader, metadata_size, timeout)
             metadata = json.loads(data.decode("utf-8"))
 
         # receive the namespace if any
         logger.debug(f"Namespace expecting size: {tail_string_size}")
         namespace = ""
         if tail_string_size > 0:
-            data = await reader.readexactly(tail_string_size)
+            data = await cls._readexactly_async(reader, tail_string_size, timeout)
             namespace = data.decode("utf-8")
 
         logger.debug("Message complete, sending response")
@@ -912,9 +948,7 @@ class ShivaServerAsync:
 
     def __init__(
         self,
-        on_new_message_callback: Callable[
-            [ShivaMessage], Coroutine[Any, Any, ShivaMessage]
-        ],
+        on_new_message_callback: Callable[[ShivaMessage], Awaitable[ShivaMessage]],
         on_new_connection: Optional[Callable[[tuple], None]] = None,
         on_connection_lost: Optional[Callable[[tuple], None]] = None,
     ) -> None:
@@ -1022,14 +1056,18 @@ class ShivaClientAsync:
         await client.connect()
         return client
 
-    async def send_message(self, message: ShivaMessage) -> ShivaMessage:
+    async def send_message(
+        self, message: ShivaMessage, timeout: float = 0
+    ) -> ShivaMessage:
         if self._writer is None or self._reader is None:
             err = "Can't send message, connect the client first."
             raise ValueError(err)
 
         await ShivaMessage.send_message_async(self._writer, message)
         logger.trace(f"Message sent: {message}")
-        responose_message = await ShivaMessage.receive_message_async(self._reader)
-        logger.trace(f"Message received: {responose_message}")
-        responose_message.sender = self._writer.get_extra_info("peername")
-        return responose_message
+        response_message = await ShivaMessage.receive_message_async(
+            self._reader, timeout=timeout
+        )
+        logger.trace(f"Message received: {response_message}")
+        response_message.sender = self._writer.get_extra_info("peername")
+        return response_message
