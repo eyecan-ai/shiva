@@ -336,6 +336,7 @@ class TestShivaBridge:
         scores: np.ndarray
         children: list
         var: list
+        birth: datetime
 
     def test_obj2msg_msg2obj(self):
 
@@ -368,6 +369,7 @@ class TestShivaBridge:
                     },
                 ],
             ],
+            birth=datetime.now(tz=timezone.utc),
         )
 
         expected_metadata = person.dict()
@@ -381,6 +383,7 @@ class TestShivaBridge:
         expected_metadata["var"][3] = f"{ShivaBridge.TENSOR}{21}"
         expected_metadata["var"][4][0] = f"{ShivaBridge.TENSOR}{22}"
         expected_metadata["var"][4][1]["data"] = f"{ShivaBridge.TENSOR}{23}"
+        expected_metadata["birth"] = person.birth.isoformat()
 
         expected_tensors = [person.scores]
         expected_tensors.extend(person.children[0]["pics"])
@@ -431,7 +434,6 @@ class TestShivaBridge:
         wrong_objs = [
             MyObject(kind="a", unknown=lambda x: x),
             MyObject(kind="b", unknown=th.Lock()),
-            MyObject(kind="c", unknown=datetime(2021, 1, 1, tzinfo=timezone.utc)),
         ]
 
         for obj in wrong_objs:
@@ -468,6 +470,7 @@ class TestShivaBridge:
                 },
             ],
             var=[],
+            birth=datetime.now(tz=timezone.utc),
         )
 
         response_message = await client.send_message(person.to_shiva_message())

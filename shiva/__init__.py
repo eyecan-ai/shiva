@@ -18,6 +18,7 @@ from typing import (
     Sequence,
     TypeVar,
 )
+import datetime
 
 import deepdiff
 import numpy as np
@@ -344,6 +345,8 @@ class ShivaBridge(ABC, CustomModel):
                     tensors.append(v)
                     metadata[k] = f"{self.TENSOR}{tidx}"
                     tidx += 1
+                elif isinstance(v, datetime.datetime):
+                    metadata[k] = v.isoformat()
                 else:
                     msg = f"ShivaBridge unsupported type {type(v)}"
                     raise ValueError(msg)
