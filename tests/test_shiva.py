@@ -201,6 +201,15 @@ class TestShivaServer:
         c_future = server.close()
         await c_future if c_future is not None else None
 
+    @pytest.mark.asyncio
+    async def test_client_exceptions(self):
+        client = ShivaClientAsync("localhost", 1234)
+        with pytest.raises(ConnectionError):
+            await client.disconnect()
+
+        with pytest.raises(ConnectionError):
+            await client.send_message(ShivaMessage())
+
 
 class TestShivaBridge:
     class Person(ShivaBridge):

@@ -23,7 +23,7 @@ class ShivaClientAsync:
     async def disconnect(self):
         if self._writer is None:
             err = "Can't disconnect, connect the client first."
-            return logger.warning(err)
+            raise ConnectionError(err)
 
         self._writer.close()
         await self._writer.wait_closed()
@@ -43,7 +43,7 @@ class ShivaClientAsync:
     ) -> ShivaMessage:
         if self._writer is None or self._reader is None:
             err = "Can't send message, connect the client first."
-            raise ValueError(err)
+            raise ConnectionError(err)
 
         await ShivaMessage.send_message_async(self._writer, message)
         logger.trace(f"Message sent: {message}")
