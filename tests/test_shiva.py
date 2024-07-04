@@ -11,6 +11,7 @@ from uuid import uuid4
 import numpy as np
 import pydantic as pyd
 import pytest
+from loguru import logger
 
 from shiva import (
     DataPackaging,
@@ -157,7 +158,6 @@ class TestShivaServer:
         (ShivaServerAsync, cb_async_tout, 1, pytest.raises(asyncio.TimeoutError)),
         (ShivaServer, cb_sync, 0, dont_raise_sync()),
         (ShivaServerAsync, cb_async, 0, dont_raise_sync()),
-        # si rompe tutto solo nel caso del server sync, sembra che non riesca a chiudere la connessione
     ]
 
     # Here we test that the shiva message is correctly sent and received
@@ -325,8 +325,8 @@ class TestShivaBridge:
 
         server = ShivaServer(
             on_new_message_callback=manage_message,
-            on_new_connection=lambda x: print("new connection"),
-            on_connection_lost=lambda x: print("connectionlost"),
+            on_new_connection=lambda _: logger.info("New Connection"),
+            on_connection_lost=lambda _: logger.info("Connection Lost"),
         )
 
         server.wait_for_connections(forever=False)
