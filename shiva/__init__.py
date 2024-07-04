@@ -5,7 +5,6 @@ import json
 import socket
 import struct
 import threading
-import time
 from abc import ABC, abstractmethod
 from asyncio import StreamReader, StreamWriter
 from typing import (
@@ -28,6 +27,7 @@ from loguru import logger
 class ShivaConstants:
     DEFAULT_PORT = 6174
     TENSORS_KEY = "__tensors__"
+    RESERVED_PREFIX = "!"
 
 
 class PackableHeader(ABC):
@@ -173,7 +173,7 @@ class GlobalHeader(CustomModel, PackableHeader):
         return struct.pack(self.pack_format(), *elements)
 
     @classmethod
-    def unpack(cls, data):
+    def unpack(cls, data):  # TODO: struct.error
         elements = cast(list, struct.unpack(cls.pack_format(), data))
 
         # check the crc(s)
@@ -600,8 +600,10 @@ class ShivaMessage(CustomModel):
             ShivaMessage: the built Shiva message
         """
         # receive the global header
-        # receive the global header
         data = cls._readexactly(connection, GlobalHeader.pack_size())
+        if data == b"":
+            err = "No data received, connection aborted"
+            raise ConnectionAbortedError(err)
         global_header = GlobalHeader.unpack(data)
 
         # retrieve the following sizes
@@ -845,8 +847,33 @@ class ShivaMessage(CustomModel):
         await writer.drain()
 
 
+class ShivaReservedMessage(ShivaMessage):
+    """
+    A private Shiva message that is used for internal communication within the
+    Shiva framework. It is used to send special messages like errors, warnings,
+    and other internal messages.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.namespace = f"{ShivaConstants.RESERVED_PREFIX}{self.namespace}"
+
+
+class ShivaErrorMessage(ShivaReservedMessage):
+    """
+    A Shiva message that is used to send errors
+    """
+
+    def __init__(self, exception: Exception, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.namespace = f"{ShivaConstants.RESERVED_PREFIX}error"
+        self.metadata = {
+            "type": exception.__class__.__name__,
+            "message": str(exception),
+        }
+
+
 class ShivaServer:
-    _main_server = None
 
     def __init__(
         self,
@@ -861,6 +888,9 @@ class ShivaServer:
         self._accepting_socket: Optional[socket.socket] = None
         self._host = None
         self._port = None
+
+        self._threads: list[threading.Thread] = []
+        self._connections: list[socket.socket] = []  # To keep track of connections
 
     @classmethod
     def _create_accepting_socket(
@@ -894,8 +924,12 @@ class ShivaServer:
                 raise ValueError(err)
 
             while self._alive:
-                connection, address = self._accepting_socket.accept()
+                try:
+                    connection, address = self._accepting_socket.accept()
+                except OSError:
+                    break
 
+                self._connections.append(connection)
                 self._on_connection_callback(connection, address)
 
                 if self._on_new_connection is not None:
@@ -922,25 +956,29 @@ class ShivaServer:
                     message.sender = address
                     response = self._on_new_message_callback(message)
                     ShivaMessage.send_message(connection, response)
-                except Exception as e:
-                    logger.error(e)
+                except OSError:  # Generic exception to catch IO errors from the socket
                     if self._on_connection_lost is not None:
                         self._on_connection_lost(address)
                     break
+                except Exception as e:
+                    logger.error(f"{e.__class__.__name__}: {e.args[0]}")
+                    ShivaMessage.send_message(connection, ShivaErrorMessage(e))
 
         thread = threading.Thread(target=reading_loop, daemon=True)
         thread.start()
 
-    def close(self, wait_time: float = 0.5):
+        self._threads.append(thread)
+
+    def close(self):
         self._alive = False
-        try:
-            # self connect to wakeup accepting socket
-            socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(
-                (self._host, self._port)
-            )
-            time.sleep(wait_time)
-        except Exception as e:
-            logger.warning(e)
+        if self._accepting_socket:
+            self._accepting_socket.shutdown(socket.SHUT_RDWR)
+            self._accepting_socket.close()
+        for connection in self._connections:
+            connection.shutdown(socket.SHUT_RDWR)
+            connection.close()
+        for thread in self._threads:
+            thread.join()
 
 
 class ShivaServerAsync:
@@ -994,11 +1032,8 @@ class ShivaServerAsync:
                     self._on_connection_lost(peername)
                 break
             except Exception as e:
-                logger.error(e)
-                await ShivaMessage.send_message_async(
-                    writer,
-                    ShivaMessage(namespace="error", metadata={"message": str(e)}),
-                )
+                logger.error(f"{e.__class__.__name__}: {e.args[0]}")
+                await ShivaMessage.send_message_async(writer, ShivaErrorMessage(e))
 
     @classmethod
     async def accept_new_connections(
