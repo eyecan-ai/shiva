@@ -118,6 +118,13 @@ ignore = [
   "PLR0912",
   "PLR0913",
   "PLR0915",
+  # Ignore pipe operator for union types since we support Python 3.9
+  "UP007",
+  # Ignore binding to 0.0.0.0 since it's a common pattern for web servers
+  "S104",
+  # Ignore boolean-typed positional arguments in function definition warning
+  "FBT001",
+  "FBT002",
 ]
 unfixable = [
   # Don't touch unused imports
