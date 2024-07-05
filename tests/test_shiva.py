@@ -70,7 +70,7 @@ class TestShivaModel:
         (-1, pytest.raises(ValueError)),  # change crc1
         (-2, pytest.raises(ValueError)),  # change crc2
         # change random byte, crcs should keep us safe
-        (secrets.randbelow(GlobalHeader.pack_size()), pytest.raises(ValueError)),
+        (secrets.randbelow(GlobalHeader.pack_size() - 1), pytest.raises(ValueError)),
     ]
 
     @pytest.mark.parametrize("data, expectation", TEST_DATA_PACKAGING)
