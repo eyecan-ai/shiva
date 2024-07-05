@@ -376,7 +376,7 @@ class TestShivaServer:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "server_cls, server_cb, expectation, error", TEST_ERROR_LOG
+        "server_cls, server_cb, expectation, error", TEST_ERROR_LOGGING
     )
     async def test_error_logging(self, server_cls, server_cb, expectation, error):
         server: t.Union[ShivaServer, ShivaServerAsync]
