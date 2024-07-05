@@ -477,9 +477,15 @@ class ShivaReservedMessage(ShivaMessage):
     and other internal messages.
     """
 
+    TAG = "reserved"
+
+    class MetadataSchema(pyd.BaseModel):
+        type: str
+        message: str
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.namespace = f"{ShivaConstants.RESERVED_PREFIX}{self.namespace}"
+        self.namespace = f"{ShivaConstants.RESERVED_PREFIX}{self.TAG}"
 
 
 class ShivaErrorMessage(ShivaReservedMessage):
@@ -487,10 +493,12 @@ class ShivaErrorMessage(ShivaReservedMessage):
     A Shiva message that is used to send errors
     """
 
+    TAG = "error"
+
     def __init__(self, exception: Exception, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.namespace = f"{ShivaConstants.RESERVED_PREFIX}error"
-        self.metadata = {
-            "type": exception.__class__.__name__,
-            "message": str(exception),
-        }
+        self.namespace = f"{ShivaConstants.RESERVED_PREFIX}{self.TAG}"
+        self.metadata = self.MetadataSchema(
+            type=exception.__class__.__name__,
+            message=str(exception),
+        ).dict()

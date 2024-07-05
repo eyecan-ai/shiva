@@ -1,10 +1,13 @@
 import asyncio
+import secrets
 import struct
+import threading
 import threading as th
 import time
 import typing as t
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
+from functools import partial
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -15,8 +18,10 @@ from loguru import logger
 
 from shiva import (
     DataPackaging,
+    GlobalHeader,
     ShivaBridge,
     ShivaClientAsync,
+    ShivaErrorMessage,
     ShivaMessage,
     ShivaServer,
     ShivaServerAsync,
@@ -26,12 +31,7 @@ from shiva import (
 
 # Helper functions
 @contextmanager
-def dont_raise_sync():
-    yield None
-
-
-@asynccontextmanager
-async def dont_raise_async():
+def dont_raise():
     yield None
 
 
@@ -53,8 +53,16 @@ def cb_sync_tout(m, t=2):
     return m
 
 
+def cb_sync_exc(m):
+    raise Exception()
+
+
+async def cb_async_exc(m):
+    raise Exception()
+
+
 class TestShivaMessage:
-    MESSAGES_TO_TEST: t.ClassVar = [
+    TEST_MESSAGES: t.ClassVar = [
         # Good simple messages
         (
             {"a": 2, "b": 3.145, "s": "a_String", "l": [1, 2, 34], "d": None},
@@ -63,7 +71,7 @@ class TestShivaMessage:
                 for x in TensorDataTypes.RAW_NUMPY_2_DTYPE.keys()
             ],
             "namespace",
-            dont_raise_sync(),
+            dont_raise(),
         ),
         # Good simple messages with another namespace
         (
@@ -73,7 +81,7 @@ class TestShivaMessage:
                 for x in TensorDataTypes.RAW_NUMPY_2_DTYPE.keys()
             ],
             "x",
-            dont_raise_sync(),
+            dont_raise(),
         ),
         # # Bad Message with wrong tensor type
         (
@@ -102,8 +110,8 @@ class TestShivaMessage:
     ]
 
     # Here we test that the shiva message is correctly built and parsed
-    @pytest.mark.parametrize("meta, tensors, namespace, msg_exp", MESSAGES_TO_TEST)
-    def test_shiva_message(self, meta, tensors, namespace, msg_exp):
+    @pytest.mark.parametrize("meta, tensors, namespace, msg_exp", TEST_MESSAGES)
+    def test_messages(self, meta, tensors, namespace, msg_exp):
         with msg_exp:
             message = ShivaMessage(metadata=meta, tensors=tensors, namespace=namespace)
             buffer = message.flush()
@@ -113,7 +121,7 @@ class TestShivaMessage:
     # Here we test that the shiva message is correctly built and parsed even if
     # the tensor type is no more supported by the DataPackaging class
     # (np.float64 has been replaced by np.double
-    def test_shiva_message_float64(self):
+    def test_float64_message(self):
         message = ShivaMessage(
             metadata={"name": "float64test", "age": 16, "pi": 3.14, "success": True},
             tensors=[np.random.rand(128, 128, 3).astype(np.float64)],
@@ -153,32 +161,53 @@ class TestShivaMessage:
 
 class TestShivaServer:
 
-    SERVERS_TO_TEST: t.ClassVar = [
+    TEST_BASE: t.ClassVar = [
         (ShivaServer, cb_sync_tout, 1, pytest.raises(asyncio.TimeoutError)),
         (ShivaServerAsync, cb_async_tout, 1, pytest.raises(asyncio.TimeoutError)),
-        (ShivaServer, cb_sync, 0, dont_raise_sync()),
-        (ShivaServerAsync, cb_async, 0, dont_raise_sync()),
+        (ShivaServer, cb_sync, 0, dont_raise()),
+        (ShivaServerAsync, cb_async, 0, dont_raise()),
     ]
 
-    # Here we test that the shiva message is correctly sent and received
+    TEST_FOREVER: t.ClassVar = [
+        (ShivaServer, cb_sync, True, pytest.raises(ConnectionRefusedError)),
+        (ShivaServerAsync, cb_async, True, pytest.raises(ConnectionRefusedError)),
+        (ShivaServer, cb_sync, False, dont_raise()),
+        (ShivaServerAsync, cb_async, False, dont_raise()),
+    ]
+
+    TEST_ERROR_LOGGING: t.ClassVar = [
+        (ShivaServer, cb_sync_exc, dont_raise(), ShivaErrorMessage(Exception())),
+        (ShivaServerAsync, cb_async_exc, dont_raise(), ShivaErrorMessage(Exception())),
+    ]
+
+    TEST_CLOSING: t.ClassVar = [
+        (ShivaServer, cb_sync, pytest.raises(RuntimeError)),
+        (ShivaServerAsync, cb_async, pytest.raises(RuntimeError)),
+    ]
+
+    # Here we test:
+    # 1. The server is correctly created and the callbacks are correctly set
+    # 2. The server can accept multiple clients
+    # 3. The server can correctly send and receive messages
+    # 4. The client raises an exception if the server is taking too long to respond
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("server_cls, server_cb, tout, srv_exp", SERVERS_TO_TEST)
-    async def test_shiva_server(self, server_cls, server_cb, tout, srv_exp):
+    @pytest.mark.parametrize("server_cls, server_cb, to, expectation", TEST_BASE)
+    async def test_base(self, server_cls, server_cb, to, expectation):
         token = uuid4()
 
-        def callback(other_token):
+        def callback(other_token, _):
             nonlocal token
             assert token == other_token
 
-        meta, tensors, namespace = TestShivaMessage.MESSAGES_TO_TEST[0][:3]
+        meta, tensors, namespace = TestShivaMessage.TEST_MESSAGES[0][:3]
         message = ShivaMessage(metadata=meta, tensors=tensors, namespace=namespace)
 
         server: t.Union[ShivaServer, ShivaServerAsync]
 
         server = server_cls(
             on_new_message_callback=server_cb,
-            on_new_connection=callback(token),
-            on_connection_lost=callback(token),
+            on_new_connection=partial(callback, token),
+            on_connection_lost=partial(callback, token),
         )
 
         # if the server is sync, res will be None
@@ -187,19 +216,131 @@ class TestShivaServer:
         # if the server is async, we need to await the result
         await wfc_future if wfc_future is not None else None
 
-        # we create two clients to test the server with multiple connections
-        client = await ShivaClientAsync.create_and_connect()
-        client2 = await ShivaClientAsync.create_and_connect()
+        # we create multiple clients to test the server with multiple connections
+        cs = [await ShivaClientAsync.create_and_connect() for _ in range(13)]
 
-        with srv_exp:
-            response_message = await client.send_message(message, timeout=tout)
-            assert response_message == message
+        with expectation:
+            assert await secrets.choice(cs).send_message(message, timeout=to) == message
 
-        await client.disconnect()
-        await client2.disconnect()
+        [await client.disconnect() for client in cs]
 
         c_future = server.close()
         await c_future if c_future is not None else None
+
+    # Here we test the server if it's blocking the loop
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("server_cls, server_cb, close, expectation", TEST_FOREVER)
+    async def test_forever(self, server_cls, server_cb, close, expectation):
+        server: t.Union[ShivaServer, ShivaServerAsync]
+
+        server = server_cls(
+            on_new_message_callback=server_cb,
+        )
+
+        async def server_thread():
+            wfc_future = server.wait_for_connections(forever=True)
+            try:
+                return await wfc_future if wfc_future is not None else None
+            except asyncio.CancelledError:
+                return
+
+        thread = threading.Thread(
+            target=lambda: asyncio.run(server_thread()),
+            daemon=True,
+        )
+        thread.start()
+
+        # Wait for the server to accept connections
+        trials = 0
+        while trials < 100:
+            try:
+                client = await ShivaClientAsync.create_and_connect()
+                break
+            except Exception as _:
+                trials += 1
+            time.sleep(0.1)
+
+        meta, tensors, namespace = TestShivaMessage.TEST_MESSAGES[0][:3]
+        message = ShivaMessage(metadata=meta, tensors=tensors, namespace=namespace)
+
+        response = await client.send_message(message)
+        assert response == message
+
+        if close:
+            c_future = server.close()
+            await c_future if c_future is not None else None
+            await client.disconnect()
+
+        # check that the server is closed
+        with expectation:
+            client_2 = await ShivaClientAsync.create_and_connect()
+            await client_2.disconnect()
+
+        if not close:
+            c_future = server.close()
+            await c_future if c_future is not None else None
+            await client.disconnect()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "server_cls, server_cb, expectation, error", TEST_ERROR_LOGGING
+    )
+    async def test_error_logging(self, server_cls, server_cb, expectation, error):
+        server: t.Union[ShivaServer, ShivaServerAsync]
+
+        server = server_cls(
+            on_new_message_callback=server_cb,
+        )
+        wfc_future = server.wait_for_connections(forever=False)
+        await wfc_future if wfc_future is not None else None
+
+        meta, tensors, namespace = TestShivaMessage.TEST_MESSAGES[0][:3]
+        message = ShivaMessage(metadata=meta, tensors=tensors, namespace=namespace)
+        client = await ShivaClientAsync.create_and_connect()
+
+        with expectation:
+            response = await client.send_message(message)
+            assert response == error
+
+        c_future = server.close()
+        await c_future if c_future is not None else None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("server_cls, server_cb, expectation", TEST_CLOSING)
+    async def test_closing(self, server_cls, server_cb, expectation):
+        server: t.Union[ShivaServer, ShivaServerAsync]
+        server = server_cls(on_new_message_callback=server_cb)
+        with expectation:
+            c_future = server.close()
+            await c_future if c_future is not None else None
+
+    # @pytest.mark.asyncio
+    # async def _test_async_server_connection_drop(self, monkeypatch):
+
+    #     # new_pack_size = GlobalHeader.pack_format() + 1
+
+    #     # print(new_pack_size)
+
+    #     @classmethod
+    #     def smaller_pack_format(_, *args, **kwargs):
+    #         raise asyncio.IncompleteReadError(b"", 0)
+
+    #     monkeypatch.setattr(
+    #         "shiva.ShivaMessage.receive_message_async", smaller_pack_format
+    #     )
+
+    #     server = ShivaServerAsync(cb_async)
+    #     await server.wait_for_connections(forever=False)
+
+    #     client = await ShivaClientAsync.create_and_connect()
+
+    #     meta, tensors, namespace = TestShivaMessage.TEST_MESSAGES[0][:3]
+
+    #     message = ShivaMessage(metadata=meta, tensors=tensors, namespace=namespace)
+
+    #     await client.send_message(message)
+
+    #     # await client.disconnect()
 
     @pytest.mark.asyncio
     async def test_client_exceptions(self):
@@ -332,11 +473,7 @@ class TestShivaBridge:
         def manage_message(message: ShivaMessage) -> ShivaMessage:
             return message
 
-        server = ShivaServer(
-            on_new_message_callback=manage_message,
-            on_new_connection=lambda _: logger.info("New Connection"),
-            on_connection_lost=lambda _: logger.info("Connection Lost"),
-        )
+        server = ShivaServer(on_new_message_callback=manage_message)
 
         server.wait_for_connections(forever=False)
 

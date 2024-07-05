@@ -54,28 +54,28 @@ class ShivaServer:
         self._alive = True
         self._accepting_thread = None
 
-        def accept_connections():
-            if self._accepting_socket is None:
-                err = "The accepting socket is not initialized"
-                raise ValueError(err)
-
+        def accept_connections(socket: socket.socket):
             while self._alive:
                 try:
-                    connection, address = self._accepting_socket.accept()
+                    connection, address = socket.accept()
                 except OSError:
-                    break
+                    # When the socket is shutdown, the accept method raises an OSError,
+                    # so we catch it and let the loop exit gracefully
+                    logger.trace("Accepting socket closed.")
+                else:
+                    if self._on_new_connection is not None:
+                        self._on_new_connection(address)
 
-                self._connections.append(connection)
-                self._on_connection_callback(connection, address)
+                    self._on_connection_callback(connection, address)
 
-                if self._on_new_connection is not None:
-                    self._on_new_connection(address)
+                    self._connections.append(connection)
 
         if forever:
-            accept_connections()
+            accept_connections(self._accepting_socket)
         else:
             self._accepting_thread = threading.Thread(
                 target=accept_connections,
+                args=(self._accepting_socket,),
                 daemon=True,
             )
             self._accepting_thread.start()
@@ -95,9 +95,10 @@ class ShivaServer:
                 except OSError:  # Generic exception to catch IO errors from the socket
                     if self._on_connection_lost is not None:
                         self._on_connection_lost(address)
-                    break
                 except Exception as e:
-                    logger.error(f"{e.__class__.__name__}: {e.args[0]}")
+                    logger.error(
+                        f"{e.__class__.__name__}: {e.args[0] if e.args else ''}"
+                    )
                     ShivaMessage.send_message(connection, ShivaErrorMessage(e))
 
         thread = threading.Thread(target=reading_loop, daemon=True)
@@ -107,9 +108,11 @@ class ShivaServer:
 
     def close(self):
         self._alive = False
-        if self._accepting_socket:
-            self._accepting_socket.shutdown(socket.SHUT_RDWR)
-            self._accepting_socket.close()
+        if self._accepting_socket is None:
+            err = "Server is not running, did you forget to call wait_for_connections?"
+            raise RuntimeError(err)
+        self._accepting_socket.shutdown(socket.SHUT_RDWR)
+        self._accepting_socket.close()
         for connection in self._connections:
             connection.shutdown(socket.SHUT_RDWR)
             connection.close()
@@ -168,7 +171,7 @@ class ShivaServerAsync:
                     self._on_connection_lost(peername)
                 break
             except Exception as e:
-                logger.error(f"{e.__class__.__name__}: {e.args[0]}")
+                logger.error(f"{e.__class__.__name__}: {e.args[0] if e.args else ''}")
                 await ShivaMessage.send_message_async(writer, ShivaErrorMessage(e))
 
     @classmethod
@@ -182,7 +185,12 @@ class ShivaServerAsync:
         async def new_connection(reader, writer):
             await on_connection_callback(reader, writer)
 
-        cls._main_server = await asyncio.start_server(new_connection, host, port)
+        cls._main_server = await asyncio.start_server(
+            new_connection,
+            host,
+            port,
+            start_serving=False,
+        )
 
         if forever:
             async with cls._main_server:
@@ -192,6 +200,9 @@ class ShivaServerAsync:
 
     @classmethod
     async def close(cls):
-        if cls._main_server is not None:
-            cls._main_server.close()
-            await cls._main_server.wait_closed()
+        if cls._main_server is None:
+            err = "Server is not running, did you forget to call wait_for_connections?"
+            raise RuntimeError(err)
+        cls._main_server.close()
+        await cls._main_server.wait_closed()
+        cls._main_server = None
