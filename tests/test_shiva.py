@@ -1,5 +1,6 @@
 import asyncio
 import secrets as sc
+import socket
 import struct
 import threading
 import threading as th
@@ -411,6 +412,47 @@ class TestShivaServer:
         with expectation:
             c_future = server.close()
             await c_future if c_future is not None else None
+
+    @pytest.mark.asyncio
+    async def test_client_not_closed_sync(self):
+        server = ShivaServer(on_new_message_callback=cb_sync)
+
+        server.wait_for_connections(forever=False)
+
+        client = await ShivaClientAsync.create_and_connect()
+        good_response = await client.send_message(self.GOOD_MESSAGE)
+        assert good_response == self.GOOD_MESSAGE
+        if isinstance(server, ShivaServer):
+            assert len(server._connections) == 1
+            assert server._connections[0].fileno() != -1
+            server._connections[0].shutdown(socket.SHUT_RDWR)
+            server._connections[0].close()
+            assert server._accepting_socket is not None
+            assert server._accepting_socket.fileno() != -1
+            server._accepting_socket.shutdown(socket.SHUT_RDWR)
+            server._accepting_socket.close()
+            server.close()
+
+        await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_client_not_closed_async(self):
+        server = ShivaServerAsync(on_new_message_callback=cb_async)
+
+        await server.wait_for_connections(forever=False)
+
+        client = await ShivaClientAsync.create_and_connect()
+        good_response = await client.send_message(self.GOOD_MESSAGE)
+        assert good_response == self.GOOD_MESSAGE
+
+        if isinstance(server, ShivaServerAsync):
+            assert ShivaServerAsync._main_server is not None
+            assert ShivaServerAsync._main_server.sockets is not None
+            assert ShivaServerAsync._main_server.sockets[0].fileno() != -1
+            await server.close()
+            assert ShivaServerAsync._main_server is None
+
+        await client.disconnect()
 
     @pytest.mark.asyncio
     async def test_client_exceptions(self):

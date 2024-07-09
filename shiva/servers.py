@@ -111,17 +111,13 @@ class ShivaServer:
         if self._accepting_socket is None:
             err = "Server is not running, did you forget to call wait_for_connections?"
             raise RuntimeError(err)
-        try:
+        if self._accepting_socket.fileno() != -1:
             self._accepting_socket.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
-        self._accepting_socket.close()
+            self._accepting_socket.close()
         for connection in self._connections:
-            try:
+            if connection.fileno() != -1:
                 connection.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
-            connection.close()
+                connection.close()
         for thread in self._threads:
             thread.join()
 
