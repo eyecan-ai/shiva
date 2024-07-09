@@ -304,6 +304,12 @@ class TestShivaServer:
         # if the server is async, we need to await the result
         await wfc_future if wfc_future is not None else None
 
+        # we close it and reopen it
+        c_future = server.close()
+        await c_future if c_future is not None else None
+        wfc_future = server.wait_for_connections(forever=False)
+        await wfc_future if wfc_future is not None else None
+
         # we create multiple clients to test the server with multiple connections
         cs = [await ShivaClientAsync.create_and_connect() for _ in range(13)]
 
