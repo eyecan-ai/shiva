@@ -119,6 +119,10 @@ class ShivaServer:
         for thread in self._threads:
             thread.join()
 
+        self._accepting_socket = None
+        self._connections = []
+        self._threads = []
+
 
 class ShivaServerAsync:
     _main_server = None

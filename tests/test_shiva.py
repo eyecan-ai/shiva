@@ -1,5 +1,5 @@
 import asyncio
-import secrets
+import secrets as sc
 import struct
 import threading
 import threading as th
@@ -70,7 +70,7 @@ class TestShivaModel:
         (-1, pytest.raises(ValueError)),  # change crc1
         (-2, pytest.raises(ValueError)),  # change crc2
         # change random byte, crcs should keep us safe
-        (secrets.randbelow(GlobalHeader.pack_size() - 1), pytest.raises(ValueError)),
+        (sc.randbelow(len(GlobalHeader.pack_format()) - 1), pytest.raises(ValueError)),
     ]
 
     @pytest.mark.parametrize("data, expectation", TEST_DATA_PACKAGING)
@@ -308,10 +308,10 @@ class TestShivaServer:
         cs = [await ShivaClientAsync.create_and_connect() for _ in range(13)]
 
         with expectation:
-            c = secrets.choice(cs)
+            c = sc.choice(cs)
             good_response = await c.send_message(self.GOOD_MESSAGE, timeout=to)
             assert good_response == self.GOOD_MESSAGE
-            c = secrets.choice(cs)
+            c = sc.choice(cs)
             empty_response = await c.send_message(self.EMPTY_MESSAGE, timeout=to)
             assert empty_response == self.EMPTY_MESSAGE
 
