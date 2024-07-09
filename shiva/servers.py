@@ -25,8 +25,12 @@ class ShivaServer:
         self._host = None
         self._port = None
 
+        self._lock = threading.RLock()
+
         self._threads: list[threading.Thread] = []
-        self._connections: list[socket.socket] = []  # To keep track of connections
+
+        with self._lock:
+            self._connections: list[socket.socket] = []
 
     @classmethod
     def _create_accepting_socket(
@@ -68,7 +72,8 @@ class ShivaServer:
 
                     self._on_connection_callback(connection, address)
 
-                    self._connections.append(connection)
+                    with self._lock:
+                        self._connections.append(connection)
 
         if forever:
             accept_connections(self._accepting_socket)
@@ -92,9 +97,17 @@ class ShivaServer:
                     message.sender = address
                     response = self._on_new_message_callback(message)
                     ShivaMessage.send_message(connection, response)
-                except OSError:  # Generic exception to catch IO errors from the socket
+                # Generic exception to catch IO errors from the socket, this is triggered
+                # also when the client disconnects, so we can handle it
+                except OSError:
                     if self._on_connection_lost is not None:
                         self._on_connection_lost(address)
+
+                        # Client is disconnected, we remove it from the list
+                        with self._lock:
+                            self._connections.remove(connection)
+
+                        break
                 except Exception as e:
                     logger.error(
                         f"{e.__class__.__name__}: {e.args[0] if e.args else ''}"
@@ -111,18 +124,22 @@ class ShivaServer:
         if self._accepting_socket is None:
             err = "Server is not running, did you forget to call wait_for_connections?"
             raise RuntimeError(err)
-        if self._accepting_socket.fileno() != -1:
-            self._accepting_socket.shutdown(socket.SHUT_RDWR)
-            self._accepting_socket.close()
-        for connection in self._connections:
-            if connection.fileno() != -1:
-                connection.shutdown(socket.SHUT_RDWR)
-                connection.close()
+
+        # We close the accepting socket and all the connections
+        logger.trace("Shutting down, closing sockets...")
+        for sock in [self._accepting_socket, *self._connections]:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+                sock.close()
+            except OSError:
+                logger.trace(f"Socket {sock} already closed, skipping...")
+
         for thread in self._threads:
             thread.join()
 
         self._accepting_socket = None
-        self._connections = []
+        with self._lock:
+            self._connections = []
         self._threads = []
 
 
@@ -172,7 +189,7 @@ class ShivaServerAsync:
                 )
 
                 await ShivaMessage.send_message_async(writer, response_message)
-            except (asyncio.exceptions.IncompleteReadError, BrokenPipeError):
+            except (asyncio.exceptions.IncompleteReadError, OSError):
                 if self._on_connection_lost is not None:
                     self._on_connection_lost(peername)
                 break

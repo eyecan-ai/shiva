@@ -54,12 +54,15 @@ def cb_sync_tout(m, t=2):
     return m
 
 
+_sample_exc = Exception("Don't worry, it's a test!")
+
+
 def cb_sync_exc(_):
-    raise Exception()
+    raise _sample_exc
 
 
 async def cb_async_exc(_):
-    raise Exception()
+    raise _sample_exc
 
 
 class TestShivaModel:
@@ -268,8 +271,8 @@ class TestShivaServer:
     ]
 
     TEST_ERROR_LOGGING: t.ClassVar = [
-        (ShivaServer, cb_sync_exc, dont_raise(), ShivaErrorMessage(Exception())),
-        (ShivaServerAsync, cb_async_exc, dont_raise(), ShivaErrorMessage(Exception())),
+        (ShivaServer, cb_sync_exc, dont_raise(), ShivaErrorMessage(_sample_exc)),
+        (ShivaServerAsync, cb_async_exc, dont_raise(), ShivaErrorMessage(_sample_exc)),
     ]
 
     TEST_CLOSING: t.ClassVar = [
@@ -312,7 +315,7 @@ class TestShivaServer:
         await wfc_future if wfc_future is not None else None
 
         # we create multiple clients to test the server with multiple connections
-        cs = [await ShivaClientAsync.create_and_connect() for _ in range(13)]
+        cs = [await ShivaClientAsync.create_and_connect() for _ in range(100)]
 
         with expectation:
             c = sc.choice(cs)
@@ -323,6 +326,9 @@ class TestShivaServer:
             assert empty_response == self.EMPTY_MESSAGE
 
         [await client.disconnect() for client in cs]
+
+        # We wait for the clients to be disconnected, will it be enough?
+        time.sleep(3)
 
         c_future = server.close()
         await c_future if c_future is not None else None
@@ -358,7 +364,7 @@ class TestShivaServer:
                 break
             except Exception as _:
                 trials += 1
-            time.sleep(0.1)
+            time.sleep(0.01)
 
         response = await client.send_message(self.GOOD_MESSAGE)
         assert response == self.GOOD_MESSAGE
