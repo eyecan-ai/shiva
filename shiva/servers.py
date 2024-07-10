@@ -116,11 +116,14 @@ class ShivaServer:
                 with self._lock:
                     self._connections.append(writer)
 
-    def close(self):
+    def close(self, wait_time: float = 0.5):
         self._alive = False
         if self._accepting_socket is None:
             err = "Server is not running, did you forget to call wait_for_connections?"
             raise RuntimeError(err)
+
+        # We wait for the threads to finish
+        time.sleep(wait_time)
 
         # We close the accepting socket and all the connections
         logger.trace("Shutting down, closing sockets...")
@@ -227,11 +230,14 @@ class ShivaServerAsync:
 
         await self._on_connection_callback(reader=reader, writer=writer)
 
-    async def close(self):
+    async def close(self, wait_time: float = 0.5):
         self._alive = False
         if self._main_server is None:
             err = "Server is not running, did you forget to call wait_for_connections?"
             raise RuntimeError(err)
+
+        # We wait for the tasks to finish
+        await asyncio.sleep(wait_time)
 
         # We close the server and all the connections
         self._main_server.close()

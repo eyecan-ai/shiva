@@ -288,11 +288,6 @@ class TestShivaServer:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("server_cls, server_cb, to, expectation", TEST_BASE)
     async def test_base(self, server_cls, server_cb, to, expectation):
-        # token = uuid4()
-
-        # def callback(other_token, _):
-        #     nonlocal token
-        #     assert token == other_token
 
         num_connected = 0
 
