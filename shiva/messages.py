@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import socket
+import struct
 
 import deepdiff
 import numpy as np
@@ -223,11 +224,12 @@ class ShivaMessage(CustomModel):
             ShivaMessage: the built Shiva message
         """
         # receive the global header
-        data = cls._readexactly(connection, GlobalHeader.pack_size())
-        if data == b"":
+        try:
+            data = cls._readexactly(connection, GlobalHeader.pack_size())
+            global_header = GlobalHeader.unpack(data)
+        except struct.error as e:
             err = "No data received, connection aborted"
-            raise ConnectionAbortedError(err)
-        global_header = GlobalHeader.unpack(data)
+            raise ConnectionAbortedError(err) from e
 
         # retrieve the following sizes
         metadata_size = global_header.metadata_size
@@ -357,8 +359,15 @@ class ShivaMessage(CustomModel):
         """
 
         # receive the global header
-        data = await cls._readexactly_async(reader, GlobalHeader.pack_size(), timeout)
-        global_header = GlobalHeader.unpack(data)
+        try:
+            data = await cls._readexactly_async(
+                reader, GlobalHeader.pack_size(), timeout
+            )
+            global_header = GlobalHeader.unpack(data)
+        except asyncio.IncompleteReadError as e:
+            err = "No data received, connection aborted"
+            raise ConnectionAbortedError(err) from e
+
         logger.debug(f"Global header: {global_header}")
 
         # retrieve the following sizes

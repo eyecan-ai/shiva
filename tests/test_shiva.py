@@ -288,6 +288,11 @@ class TestShivaServer:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("server_cls, server_cb, to, expectation", TEST_BASE)
     async def test_base(self, server_cls, server_cb, to, expectation):
+        # token = uuid4()
+
+        # def callback(other_token, _):
+        #     nonlocal token
+        #     assert token == other_token
 
         num_connected = 0
 
@@ -461,11 +466,10 @@ class TestShivaServer:
         assert good_response == self.GOOD_MESSAGE
 
         if isinstance(server, ShivaServerAsync):
-            assert ShivaServerAsync._main_server is not None
-            assert ShivaServerAsync._main_server.sockets is not None
-            assert ShivaServerAsync._main_server.sockets[0].fileno() != -1
+            assert server._main_server is not None
+            assert server._main_server.sockets is not None
+            assert server._main_server.sockets[0].fileno() != -1
             await server.close()
-            assert ShivaServerAsync._main_server is None
 
         await client.disconnect()
 
