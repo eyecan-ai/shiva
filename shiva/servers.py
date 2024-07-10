@@ -91,6 +91,8 @@ class ShivaServer:
                     )
                     ShivaMessage.send_message(connection, ShivaErrorMessage(e))
 
+                time.sleep(0.0001)
+
         if self._on_new_connection is not None:
             self._on_new_connection(address)
 
@@ -114,13 +116,11 @@ class ShivaServer:
                 with self._lock:
                     self._connections.append(writer)
 
-    def close(self, wait_time: float = 0.1):
+    def close(self):
         self._alive = False
         if self._accepting_socket is None:
             err = "Server is not running, did you forget to call wait_for_connections?"
             raise RuntimeError(err)
-
-        time.sleep(wait_time)
 
         # We close the accepting socket and all the connections
         logger.trace("Shutting down, closing sockets...")
@@ -212,6 +212,8 @@ class ShivaServerAsync:
                     )
                     await ShivaMessage.send_message_async(writer, ShivaErrorMessage(e))
 
+                await asyncio.sleep(0.0001)
+
         if self._on_new_connection is not None:
             self._on_new_connection(writer.get_extra_info("peername"))
 
@@ -225,13 +227,11 @@ class ShivaServerAsync:
 
         await self._on_connection_callback(reader=reader, writer=writer)
 
-    async def close(self, wait_time: float = 0.1):
+    async def close(self):
         self._alive = False
         if self._main_server is None:
             err = "Server is not running, did you forget to call wait_for_connections?"
             raise RuntimeError(err)
-
-        await asyncio.sleep(wait_time)
 
         # We close the server and all the connections
         self._main_server.close()
