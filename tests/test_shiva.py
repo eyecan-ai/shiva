@@ -288,18 +288,23 @@ class TestShivaServer:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("server_cls, server_cb, to, expectation", TEST_BASE)
     async def test_base(self, server_cls, server_cb, to, expectation):
-        token = uuid4()
 
-        def callback(other_token, _):
-            nonlocal token
-            assert token == other_token
+        num_connected = 0
+
+        def conn_callback(_):
+            nonlocal num_connected
+            num_connected += 1
+
+        def disconn_callback(_):
+            nonlocal num_connected
+            num_connected -= 1
 
         server: t.Union[ShivaServer, ShivaServerAsync]
 
         server = server_cls(
             on_new_message_callback=server_cb,
-            on_new_connection=partial(callback, token),
-            on_connection_lost=partial(callback, token),
+            on_new_connection=conn_callback,
+            on_connection_lost=disconn_callback,
         )
 
         # if the server is sync, res will be None
@@ -317,18 +322,22 @@ class TestShivaServer:
         # we create multiple clients to test the server with multiple connections
         cs = [await ShivaClientAsync.create_and_connect() for _ in range(100)]
 
+        while num_connected < len(cs):
+            time.sleep(0.0001)
+
         with expectation:
             c = sc.choice(cs)
             good_response = await c.send_message(self.GOOD_MESSAGE, timeout=to)
             assert good_response == self.GOOD_MESSAGE
+            cs.remove(c)
             c = sc.choice(cs)
             empty_response = await c.send_message(self.EMPTY_MESSAGE, timeout=to)
             assert empty_response == self.EMPTY_MESSAGE
 
         [await client.disconnect() for client in cs]
 
-        # We wait for the clients to be disconnected, will it be enough?
-        time.sleep(3)
+        while num_connected > len(cs):
+            time.sleep(0.0001)
 
         c_future = server.close()
         await c_future if c_future is not None else None
