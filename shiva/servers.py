@@ -29,8 +29,7 @@ class ShivaServer:
         # Socket management
         self._accepting_socket: t.Optional[socket.socket] = None
         self._lock = threading.RLock()
-        with self._lock:
-            self._connections: list[socket.socket] = []
+        self._connections: list[socket.socket] = []
 
     def wait_for_connections(
         self,
@@ -116,14 +115,11 @@ class ShivaServer:
                 with self._lock:
                     self._connections.append(writer)
 
-    def close(self, wait_time: float = 0.5):
+    def close(self):
         self._alive = False
         if self._accepting_socket is None:
             err = "Server is not running, did you forget to call wait_for_connections?"
             raise RuntimeError(err)
-
-        # We wait for the threads to finish
-        time.sleep(wait_time)
 
         # We close the accepting socket and all the connections
         logger.trace("Shutting down, closing sockets...")
@@ -155,11 +151,10 @@ class ShivaServerAsync:
         self._on_new_connection = on_new_connection
         self._on_connection_lost = on_connection_lost
 
-        # Tasks management
-        self._alive = False
-
         # Server management
         self._main_server = None
+        self._lock = asyncio.Lock()
+        self._tasks: t.MutableSequence[asyncio.Task] = []
 
     async def wait_for_connections(
         self,
@@ -182,8 +177,6 @@ class ShivaServerAsync:
         # Server Loop #
         ###############
 
-        self._alive = True
-
         if forever:
             async with self._main_server:
                 await self._main_server.serve_forever()
@@ -196,7 +189,7 @@ class ShivaServerAsync:
         writer: asyncio.StreamWriter,
     ) -> None:
         async def reading_loop():
-            while self._alive:
+            while True:
                 try:
                     message = await ShivaMessage.receive_message_async(reader)
 
@@ -220,7 +213,10 @@ class ShivaServerAsync:
         if self._on_new_connection is not None:
             self._on_new_connection(writer.get_extra_info("peername"))
 
-        await reading_loop()
+        reading_loop_task = asyncio.create_task(reading_loop())
+        async with self._lock:
+            reading_loop_task.add_done_callback(self._tasks.remove)
+            self._tasks.append(reading_loop_task)
 
     async def _accept_connections(
         self,
@@ -230,16 +226,20 @@ class ShivaServerAsync:
 
         await self._on_connection_callback(reader=reader, writer=writer)
 
-    async def close(self, wait_time: float = 0.5):
-        self._alive = False
+    async def close(self):
         if self._main_server is None:
             err = "Server is not running, did you forget to call wait_for_connections?"
             raise RuntimeError(err)
 
-        # We wait for the tasks to finish
-        await asyncio.sleep(wait_time)
+        for task in self._tasks:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
         # We close the server and all the connections
         self._main_server.close()
         await self._main_server.wait_closed()
         self._main_server = None
+        self._tasks = []

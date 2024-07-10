@@ -1,4 +1,9 @@
 import asyncio
+import concurrent
+import concurrent.futures
+import functools
+import inspect
+import os
 import secrets as sc
 import socket
 import struct
@@ -280,15 +285,15 @@ class TestShivaServer:
         (ShivaServerAsync, cb_async, pytest.raises(RuntimeError)),
     ]
 
-    # Here we test:
-    # 1. The server is correctly created and the callbacks are correctly set
-    # 2. The server can accept multiple clients
-    # 3. The server can correctly send and receive messages
-    # 4. The client raises an exception if the server is taking too long to respond
     @pytest.mark.asyncio
     @pytest.mark.parametrize("server_cls, server_cb, to, expectation", TEST_BASE)
     async def test_base(self, server_cls, server_cb, to, expectation):
 
+        # This is to track the tasks created by pytest, so they can be ignored
+        # when checking for pending tasks at the end of the test
+        pytest_tasks = set(asyncio.all_tasks())
+
+        # This is to track the number of connected clients
         num_connected = 0
 
         def conn_callback(_):
@@ -307,24 +312,26 @@ class TestShivaServer:
             on_connection_lost=disconn_callback,
         )
 
-        # if the server is sync, res will be None
+        # If the server is sync, res will be None
         wfc_future = server.wait_for_connections(forever=False)
 
-        # if the server is async, we need to await the result
+        # If the server is async, we need to await the result
         await wfc_future if wfc_future is not None else None
 
-        # we close it and reopen it
+        # We close it and reopen it
         c_future = server.close()
         await c_future if c_future is not None else None
         wfc_future = server.wait_for_connections(forever=False)
         await wfc_future if wfc_future is not None else None
 
-        # we create multiple clients to test the server with multiple connections
+        # We create multiple clients to test the server with multiple connections
         cs = [await ShivaClientAsync.create_and_connect() for _ in range(100)]
 
         while num_connected < len(cs):
             time.sleep(0.0001)
 
+        # If the server is taking too long to respond, the client will
+        # raise a timeout error but the server will still be running
         with expectation:
             c = sc.choice(cs)
             good_response = await c.send_message(self.GOOD_MESSAGE, timeout=to)
@@ -342,6 +349,10 @@ class TestShivaServer:
         c_future = server.close()
         await c_future if c_future is not None else None
 
+        # Now we check that we close successfully all the tasks
+        server_client_pending_tasks = set(asyncio.all_tasks()) - pytest_tasks
+        assert not server_client_pending_tasks  # This should be empty!
+
     # Here we test the server if it's blocking the loop
     @pytest.mark.asyncio
     @pytest.mark.parametrize("server_cls, server_cb, close, expectation", TEST_FOREVER)
@@ -352,18 +363,20 @@ class TestShivaServer:
             on_new_message_callback=server_cb,
         )
 
-        async def server_thread():
-            wfc_future = server.wait_for_connections(forever=True)
-            try:
-                return await wfc_future if wfc_future is not None else None
-            except asyncio.CancelledError:
-                return
+        close_method = None
 
-        thread = threading.Thread(
-            target=lambda: asyncio.run(server_thread()),
-            daemon=True,
-        )
-        thread.start()
+        if isinstance(server, ShivaServer):
+            thread = threading.Thread(
+                target=server.wait_for_connections,
+                kwargs={"host": "localhost", "forever": True},
+                daemon=True,
+            )
+            thread.start()
+            close_method = thread.join
+
+        if isinstance(server, ShivaServerAsync):
+            task = asyncio.create_task(server.wait_for_connections(forever=True))
+            close_method = task.cancel
 
         # Wait for the server to accept connections
         trials = 0
@@ -385,6 +398,8 @@ class TestShivaServer:
             c_future = server.close()
             await c_future if c_future is not None else None
             await client.disconnect()
+            if close_method is not None:
+                close_method()
 
         # check that the server is closed
         with expectation:
@@ -395,6 +410,8 @@ class TestShivaServer:
             c_future = server.close()
             await c_future if c_future is not None else None
             await client.disconnect()
+            if close_method is not None:
+                close_method()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
