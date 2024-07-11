@@ -4,13 +4,18 @@ services:
   server:
     image: shiva
     working_dir: /shiva/examples/connector_rest_shiva
-    command: "python server.py"
+    command: "python server_filter.py"
     restart: unless-stopped
     # to override the env variables you can set them in a .env file
     environment:    
       - HOST=${EYENODE_API_HOST:-localhost}
       - PORT=${EYENODE_API_PORT:-9999}
       - CAMERA=${EYENODE_CAMERA_NAME:-camera}
+      - HEIGHT=${HEIGHT:-1080}
+      - WIDTH=${WIDTH:-1920}
+      - IOU_FILTER_THRESHOLD=${IOU_FILTER_THRESHOLD:-0.5}
+      - FILTER_NON_PICKABLE=${FILTER_NON_PICKABLE:-true}
+      - EXTRA_CLASS_NAME=${EXTRA_CLASS_NAME:-pickable}
     network_mode: host
     ports:
       # Using long syntax to be compatible with docker compose config --no-interpolate

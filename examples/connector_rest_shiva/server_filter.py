@@ -1,62 +1,52 @@
 import asyncio
 import os
-import typing as t
 
+import cv2 as cv
 import numpy as np
-import pydantic as pyd
 import requests
 from loguru import logger
+from server import Inference, endpoint_changeformat, endpoint_info
 
 import shiva as shv
 
 HOST = os.getenv("HOST", "localhost")
-PORT = os.getenv("PORT", 9999)
+PORT = os.getenv("PORT", "9999")
 CAMERA = os.getenv("CAMERA", "camera")
+HEIGHT = int(os.getenv("HEIGHT", "1080"))
+WIDTH = int(os.getenv("WIDTH", "1920"))
+IOU_FILTER_THRESHOLD = float(os.getenv("IOU_FILTER_THRESHOLD", "0.1"))
+FILTER_NON_PICKABLE = os.getenv("FILTER_NON_PICKABLE", "true").lower() == "true"
+EXTRA_CLASS_NAME = os.getenv("EXTRA_CLASS_NAME", "pickable")
 
 
-class BoundingBox2D(pyd.BaseModel):
-    x: float
-    y: float
-    w: float = -1.0
-    h: float = -1.0
-    angle: float = 0.0
+def check_pickable(
+    bboxes: np.ndarray,
+    canvas_hw: tuple[int, int],
+    th: float,
+    ss: int,
+) -> np.ndarray:
+    height, width = canvas_hw
+    num = len(bboxes)
+    """ Check if a bounding box is pickable based on the IOU of the bounding boxes in the canvas
 
+    Returns:
+        array of bools indicating if the bounding box is pickable or not based on IOU threshold
+    """
 
-class Detection(pyd.BaseModel):
-    label: int = -1
-    score: float = 0.0
-    bbox_2d: t.Optional[BoundingBox2D] = None
-    polygon_2d: t.Optional[list] = None
-    pose_3d: t.Optional[list] = None
-    size_3d: t.Optional[list] = None
-    metadata: dict = pyd.Field(default_factory=dict)
+    canvas_stack = np.zeros((num, height // ss, width // ss), dtype=np.float32)
 
+    bboxes_ss = bboxes[:, :4] / ss
+    for i, bbox in enumerate(bboxes_ss):
+        x, y, w, h = bbox
+        angle = int(bboxes[i, 4])
+        pts = cv.boxPoints(((x, y), (w, h), angle)).astype(np.int32)  # type: ignore
+        cv.fillPoly(canvas_stack[i], [pts], 1)  # type: ignore
 
-class Inference(pyd.BaseModel):
-    detections: list[Detection] = pyd.Field(default_factory=list)
-    metadata: dict = pyd.Field(default_factory=dict)
-
-
-async def endpoint_info(message: shv.ShivaMessage) -> shv.ShivaMessage:
-    # searching for available vision pipelines
-    vision_pipelines = requests.get(
-        f"http://{HOST}:{PORT}/vision_pipelines", timeout=10
-    )
-    # check if the request was successful
-    if vision_pipelines.status_code != 200:
-        msg = "Cannot get vision pipelines"
-        raise Exception(msg)
-    vision_pipelines = vision_pipelines.json()
-    # check if there is at least one camera
-    if len(vision_pipelines) == 0:
-        msg = "No vision pipelines available"
-        raise Exception(msg)
-    metadata = {
-        "name": "Rest/Shiva Connector",
-        "version": "0.0.1",
-        "vision_pipelines": vision_pipelines,
-    }
-    return shv.ShivaMessage(metadata=metadata, tensors=[])
+    canvas_sum = np.sum(canvas_stack, axis=0)
+    canvas = np.clip(canvas_sum, 0, 2)
+    canvas_eq1 = bboxes_ss[:, 2] * bboxes_ss[:, 3]
+    canvas_eq2 = (canvas * canvas_stack - 1).clip(0, None).sum(axis=(1, 2))
+    return canvas_eq2 / canvas_eq1 < th
 
 
 async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
@@ -67,12 +57,12 @@ async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
         return shv.ShivaMessage(metadata={}, tensors=[], namespace="inference")
 
     inference = Inference.parse_obj(output.json())
+
     n_detections = len(inference.detections)
-    # label, score, bbox_2d, pose_3d, size_3d
-    columns = 1 + 1 + 5 + 16 + 3
+    # label, score, bbox_2d, pose_3d, size_3d, pickable_flag
+    columns = 1 + 1 + 5 + 16 + 3 + 1
     # -1 if not set
     data_array = np.ones((n_detections, columns), dtype=np.float32) * -1
-
     for i, det in enumerate(inference.detections):
         data_array[i, 0] = det.label
         data_array[i, 1] = det.score
@@ -94,21 +84,28 @@ async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
         if det.size_3d:
             data_array[i, 7 + 16 : 7 + 16 + 3] = np.array(det.size_3d)
 
+        if EXTRA_CLASS_NAME in det.metadata:
+            data_array[i, -1] = det.metadata.get(EXTRA_CLASS_NAME)
+
+    # filter out detections with underthreshold IOU overlap
+    if IOU_FILTER_THRESHOLD < 1:
+        valid_detections = check_pickable(
+            data_array[:, 2:7], (HEIGHT, WIDTH), IOU_FILTER_THRESHOLD, ss=2
+        )
+        logger.info(
+            f"detections after IOU {IOU_FILTER_THRESHOLD} thresholding: {valid_detections.sum()} / {n_detections}"
+        )
+        data_array = data_array[valid_detections]
+
+    # filter out non pickable detections
+    if FILTER_NON_PICKABLE:
+        pickable_flag = data_array[:, -1] == 1
+        data_array = data_array[pickable_flag]
+        logger.info(
+            f"detections after non-pickable filter: { len(data_array) } / {valid_detections.sum()}"
+        )
+
     return shv.ShivaMessage(metadata={}, tensors=[data_array], namespace="inference")
-
-
-async def endpoint_changeformat(message: shv.ShivaMessage) -> shv.ShivaMessage:
-    # setting the preferred status
-    status_id = message.metadata["id"]
-    response = requests.post(
-        f"http://{HOST}:{PORT}/settings/preferred_status/activate/{status_id}",
-        timeout=10,
-    )
-    # check if the request was successful
-    if response.status_code != 200:
-        msg = "Something went wrong during format change"
-        raise Exception(msg)
-    return shv.ShivaMessage(metadata={}, tensors=[])
 
 
 ENDPOINTS_MAP = {
