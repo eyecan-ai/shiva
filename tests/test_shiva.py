@@ -1,9 +1,4 @@
 import asyncio
-import concurrent
-import concurrent.futures
-import functools
-import inspect
-import os
 import secrets as sc
 import socket
 import struct
@@ -13,9 +8,7 @@ import time
 import typing as t
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from functools import partial
 from typing import Any, Optional
-from uuid import uuid4
 
 import numpy as np
 import pydantic as pyd
@@ -493,6 +486,43 @@ class TestShivaServer:
 
         with pytest.raises(ConnectionError):
             await client.send_message(ShivaMessage())
+
+    @pytest.mark.asyncio
+    async def test_endianness(self) -> None:
+        async def cb(m: ShivaMessage) -> ShivaMessage:
+            for tensor in m.tensors:
+                # check that the byteorder is either native or not applicable
+                assert tensor.dtype.byteorder in ["=", "|"]
+            return m
+
+        server = ShivaServerAsync(on_new_message_callback=cb)
+        await server.wait_for_connections(forever=False)
+
+        client = await ShivaClientAsync.create_and_connect()
+
+        test_tensors = [
+            # create one tensor for each supported dtype
+            np.zeros((128, 128, 3)).astype(x)
+            for x in TensorDataTypes.RAW_NUMPY_2_DTYPE.keys()
+        ]
+
+        message = ShivaMessage(
+            metadata={},
+            tensors=test_tensors,
+            namespace="endianness_test",
+        )
+
+        response = await client.send_message(message)
+
+        assert response.namespace == "endianness_test"
+        assert len(response.tensors) == len(test_tensors)
+
+        for tensor in response.tensors:
+            # check that the byteorder is either native or not applicable
+            assert tensor.dtype.byteorder in ["=", "|"]
+
+        await client.disconnect()
+        await server.close()
 
 
 class TestShivaBridge:
