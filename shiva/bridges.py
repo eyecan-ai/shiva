@@ -112,10 +112,7 @@ class ShivaBridge(ABC, CustomModel):
                         d[k] = None
                     if v.startswith(cls.TENSOR):
                         idx = int(v.split(cls.TENSOR)[1])
-                        # force native byte order since big endian is not supported
-                        # in some libraries (e.g. pytorch)
-                        tensor = tensors[idx]
-                        d[k] = tensor.astype(tensor.dtype.newbyteorder("="))
+                        d[k] = tensors[idx]
             return d
 
         obj = build(msg.metadata, msg.tensors)
