@@ -269,6 +269,10 @@ class ShivaMessage(CustomModel):
                 data,
                 dtype=tensor_header.tensor_dtype,
             ).reshape(shape)
+
+            # shiva sends tensors in big endian, convert them to the host endian
+            t = t.astype(t.dtype.newbyteorder("="))
+
             tensors.append(t)
 
         # receive the metadata if any
@@ -414,6 +418,9 @@ class ShivaMessage(CustomModel):
                 data,
                 dtype=tensor_header.tensor_dtype,
             ).reshape(shape)
+
+            # shiva sends tensors in big endian, convert them to the host endian
+            t = t.astype(t.dtype.newbyteorder("="))
 
             tensors.append(t)
 
