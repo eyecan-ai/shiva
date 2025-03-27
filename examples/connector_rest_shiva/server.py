@@ -3,7 +3,7 @@ import os
 import typing as t
 
 import numpy as np
-import pydantic as pyd
+import pydantic.v1 as pyd
 import requests
 from loguru import logger
 
