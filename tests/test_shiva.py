@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 import numpy as np
-import pydantic as pyd
+import pydantic.v1 as pyd
 import pytest
 
 from shiva import (
