@@ -5,7 +5,7 @@ import typing as t
 from abc import ABC, abstractmethod
 
 import numpy as np
-import pydantic.v1 as pyd
+import pydantic as pyd
 
 
 class CustomModel(pyd.BaseModel):
