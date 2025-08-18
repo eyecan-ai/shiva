@@ -3,7 +3,7 @@ import os
 import typing as t
 
 import numpy as np
-import pydantic.v1 as pyd
+import pydantic as pyd
 import requests
 from loguru import logger
 
@@ -66,7 +66,7 @@ async def endpoint_inference(message: shv.ShivaMessage) -> shv.ShivaMessage:
         logger.error(f"Error in inference request: {output.status_code}")
         return shv.ShivaMessage(metadata={}, tensors=[], namespace="inference")
 
-    inference = Inference.parse_obj(output.json())
+    inference = Inference.model_validate(output.json())
     n_detections = len(inference.detections)
     # label, score, bbox_2d, pose_3d, size_3d
     columns = 1 + 1 + 5 + 16 + 3

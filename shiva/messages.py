@@ -4,10 +4,10 @@ import asyncio
 import json
 import socket
 import struct
-
+import typing as t
 import deepdiff
 import numpy as np
-import pydantic.v1 as pyd
+import pydantic as pyd
 from loguru import logger
 
 from shiva.model import (
@@ -493,7 +493,7 @@ class ShivaReservedMessage(ShivaMessage):
     and other internal messages.
     """
 
-    TAG = "reserved"
+    TAG: t.ClassVar[str] = "reserved"
 
     class MetadataSchema(pyd.BaseModel):
         type: str
@@ -517,4 +517,4 @@ class ShivaErrorMessage(ShivaReservedMessage):
         self.metadata = self.MetadataSchema(
             type=exception.__class__.__name__,
             message=str(exception),
-        ).dict()
+        ).model_dump()
