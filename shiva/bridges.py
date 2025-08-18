@@ -84,7 +84,7 @@ class ShivaBridge(ABC, CustomModel):
 
             return metadata, tensors
 
-        m, ts = parse(self.dict())
+        m, ts = parse(self.model_dump())
 
         return ShivaMessage(metadata=m, tensors=ts, namespace=namespace)
 
@@ -116,4 +116,4 @@ class ShivaBridge(ABC, CustomModel):
             return d
 
         obj = build(msg.metadata, msg.tensors)
-        return cls.parse_obj(obj)
+        return cls.model_validate(obj)
