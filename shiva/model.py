@@ -11,8 +11,7 @@ import pydantic as pyd
 class CustomModel(pyd.BaseModel):
     """A custom pydantic model that allows to use arbitrary types"""
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = pyd.ConfigDict(arbitrary_types_allowed=True)
 
 
 class ShivaConstants:

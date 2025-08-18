@@ -570,7 +570,7 @@ class TestShivaBridge:
             hair=None,
         )
 
-        expected_metadata = person.dict()
+        expected_metadata = person.model_dump()
         expected_metadata["scores"] = f"{ShivaBridge.TENSOR}0"
         expected_metadata["children"][0]["pics"] = []
         for i in range(1, 10 + 1):

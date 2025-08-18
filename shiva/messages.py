@@ -517,4 +517,4 @@ class ShivaErrorMessage(ShivaReservedMessage):
         self.metadata = self.MetadataSchema(
             type=exception.__class__.__name__,
             message=str(exception),
-        ).dict()
+        ).model_dump()
