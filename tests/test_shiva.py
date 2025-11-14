@@ -90,7 +90,6 @@ class TestShivaModel:
             GlobalHeader.unpack(struct.pack(GlobalHeader.pack_format(), *elements))
 
     def test_magic_numbers(self, monkeypatch):
-
         data = GlobalHeader(metadata_size=1, n_tensors=2).pack()
         assert TensorHeader.magic_number() is None
         monkeypatch.setattr(GlobalHeader, "magic_number", classmethod(lambda _: None))
@@ -243,7 +242,6 @@ class TestShivaMessage:
 
 
 class TestShivaServer:
-
     GOOD_MESSAGE: t.ClassVar = ShivaMessage(
         namespace="namespace",
         metadata={"a": 2, "b": 3.145, "s": "a_String", "l": [1, 2, 34]},
@@ -280,8 +278,7 @@ class TestShivaServer:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("server_cls, server_cb, to, expectation", TEST_BASE)
-    async def test_base(self, server_cls, server_cb, to, expectation):
-
+    async def test_base(self, server_cls, server_cb, to, expectation, unused_tcp_port):
         # This is to track the tasks created by pytest, so they can be ignored
         # when checking for pending tasks at the end of the test
         pytest_tasks = set(asyncio.all_tasks())
@@ -306,7 +303,7 @@ class TestShivaServer:
         )
 
         # If the server is sync, res will be None
-        wfc_future = server.wait_for_connections(forever=False)
+        wfc_future = server.wait_for_connections(forever=False, port=unused_tcp_port)
 
         # If the server is async, we need to await the result
         await wfc_future if wfc_future is not None else None
@@ -314,11 +311,14 @@ class TestShivaServer:
         # We close it and reopen it
         c_future = server.close()
         await c_future if c_future is not None else None
-        wfc_future = server.wait_for_connections(forever=False)
+        wfc_future = server.wait_for_connections(forever=False, port=unused_tcp_port)
         await wfc_future if wfc_future is not None else None
 
         # We create multiple clients to test the server with multiple connections
-        cs = [await ShivaClientAsync.create_and_connect() for _ in range(100)]
+        cs = [
+            await ShivaClientAsync.create_and_connect(port=unused_tcp_port)
+            for _ in range(100)
+        ]
 
         while num_connected < len(cs):
             time.sleep(0.0001)
@@ -349,7 +349,9 @@ class TestShivaServer:
     # Here we test the server if it's blocking the loop
     @pytest.mark.asyncio
     @pytest.mark.parametrize("server_cls, server_cb, close, expectation", TEST_FOREVER)
-    async def test_forever(self, server_cls, server_cb, close, expectation):
+    async def test_forever(
+        self, server_cls, server_cb, close, expectation, unused_tcp_port
+    ):
         server: t.Union[ShivaServer, ShivaServerAsync]
 
         server = server_cls(
@@ -361,21 +363,23 @@ class TestShivaServer:
         if isinstance(server, ShivaServer):
             thread = threading.Thread(
                 target=server.wait_for_connections,
-                kwargs={"host": "localhost", "forever": True},
+                kwargs={"host": "localhost", "forever": True, "port": unused_tcp_port},
                 daemon=True,
             )
             thread.start()
             close_method = thread.join
 
         if isinstance(server, ShivaServerAsync):
-            task = asyncio.create_task(server.wait_for_connections(forever=True))
+            task = asyncio.create_task(
+                server.wait_for_connections(forever=True, port=unused_tcp_port)
+            )
             close_method = task.cancel
 
         # Wait for the server to accept connections
         trials = 0
         while trials < 100:
             try:
-                client = await ShivaClientAsync.create_and_connect()
+                client = await ShivaClientAsync.create_and_connect(port=unused_tcp_port)
                 break
             except Exception as _:
                 trials += 1
@@ -396,7 +400,7 @@ class TestShivaServer:
 
         # check that the server is closed
         with expectation:
-            client_2 = await ShivaClientAsync.create_and_connect()
+            client_2 = await ShivaClientAsync.create_and_connect(port=unused_tcp_port)
             await client_2.disconnect()
 
         if not close:
@@ -410,17 +414,19 @@ class TestShivaServer:
     @pytest.mark.parametrize(
         "server_cls, server_cb, expectation, error", TEST_ERROR_LOGGING
     )
-    async def test_error_logging(self, server_cls, server_cb, expectation, error):
+    async def test_error_logging(
+        self, server_cls, server_cb, expectation, error, unused_tcp_port
+    ):
         server: t.Union[ShivaServer, ShivaServerAsync]
 
         server = server_cls(
             on_new_message_callback=server_cb,
         )
-        wfc_future = server.wait_for_connections(forever=False)
+        wfc_future = server.wait_for_connections(forever=False, port=unused_tcp_port)
         await wfc_future if wfc_future is not None else None
 
         message = ShivaMessage()
-        client = await ShivaClientAsync.create_and_connect()
+        client = await ShivaClientAsync.create_and_connect(port=unused_tcp_port)
 
         with expectation:
             response = await client.send_message(message)
@@ -439,12 +445,12 @@ class TestShivaServer:
             await c_future if c_future is not None else None
 
     @pytest.mark.asyncio
-    async def test_client_not_closed_sync(self):
+    async def test_client_not_closed_sync(self, unused_tcp_port):
         server = ShivaServer(on_new_message_callback=cb_sync)
 
-        server.wait_for_connections(forever=False)
+        server.wait_for_connections(forever=False, port=unused_tcp_port)
 
-        client = await ShivaClientAsync.create_and_connect()
+        client = await ShivaClientAsync.create_and_connect(port=unused_tcp_port)
         good_response = await client.send_message(self.GOOD_MESSAGE)
         assert good_response == self.GOOD_MESSAGE
         if isinstance(server, ShivaServer):
@@ -461,12 +467,12 @@ class TestShivaServer:
         await client.disconnect()
 
     @pytest.mark.asyncio
-    async def test_client_not_closed_async(self):
+    async def test_client_not_closed_async(self, unused_tcp_port):
         server = ShivaServerAsync(on_new_message_callback=cb_async)
 
-        await server.wait_for_connections(forever=False)
+        await server.wait_for_connections(forever=False, port=unused_tcp_port)
 
-        client = await ShivaClientAsync.create_and_connect()
+        client = await ShivaClientAsync.create_and_connect(port=unused_tcp_port)
         good_response = await client.send_message(self.GOOD_MESSAGE)
         assert good_response == self.GOOD_MESSAGE
 
@@ -488,7 +494,7 @@ class TestShivaServer:
             await client.send_message(ShivaMessage())
 
     @pytest.mark.asyncio
-    async def test_endianness(self) -> None:
+    async def test_endianness(self, unused_tcp_port) -> None:
         async def cb(m: ShivaMessage) -> ShivaMessage:
             for tensor in m.tensors:
                 # check that the byteorder is either native or not applicable
@@ -496,9 +502,9 @@ class TestShivaServer:
             return m
 
         server = ShivaServerAsync(on_new_message_callback=cb)
-        await server.wait_for_connections(forever=False)
+        await server.wait_for_connections(forever=False, port=unused_tcp_port)
 
-        client = await ShivaClientAsync.create_and_connect()
+        client = await ShivaClientAsync.create_and_connect(port=unused_tcp_port)
 
         test_tensors = [
             # create one tensor for each supported dtype
@@ -537,7 +543,6 @@ class TestShivaBridge:
         hair: Optional[str]
 
     def test_obj2msg_msg2obj(self):
-
         person = TestShivaBridge.Person(
             name="John",
             age=25,
@@ -641,16 +646,15 @@ class TestShivaBridge:
                 obj.to_shiva_message()
 
     @pytest.mark.asyncio
-    async def test_native_byteorder(self) -> None:
-
+    async def test_native_byteorder(self, unused_tcp_port) -> None:
         def manage_message(message: ShivaMessage) -> ShivaMessage:
             return message
 
         server = ShivaServer(on_new_message_callback=manage_message)
 
-        server.wait_for_connections(forever=False)
+        server.wait_for_connections(forever=False, port=unused_tcp_port)
 
-        client = await ShivaClientAsync.create_and_connect()
+        client = await ShivaClientAsync.create_and_connect(port=unused_tcp_port)
 
         person = TestShivaBridge.Person(
             name="Alice",
