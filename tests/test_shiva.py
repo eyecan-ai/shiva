@@ -316,7 +316,9 @@ class TestShivaServer:
 
         # We create multiple clients to test the server with multiple connections
         cs = [
-            await ShivaClientAsync.create_and_connect(port=unused_tcp_port)
+            await ShivaClientAsync.create_and_connect(
+                host="127.0.0.1", port=unused_tcp_port
+            )
             for _ in range(100)
         ]
 
@@ -379,7 +381,9 @@ class TestShivaServer:
         trials = 0
         while trials < 100:
             try:
-                client = await ShivaClientAsync.create_and_connect(port=unused_tcp_port)
+                client = await ShivaClientAsync.create_and_connect(
+                    host="127.0.0.1", port=unused_tcp_port
+                )
                 break
             except Exception as _:
                 trials += 1
@@ -400,7 +404,9 @@ class TestShivaServer:
 
         # check that the server is closed
         with expectation:
-            client_2 = await ShivaClientAsync.create_and_connect(port=unused_tcp_port)
+            client_2 = await ShivaClientAsync.create_and_connect(
+                host="127.0.0.1", port=unused_tcp_port
+            )
             await client_2.disconnect()
 
         if not close:
@@ -426,7 +432,9 @@ class TestShivaServer:
         await wfc_future if wfc_future is not None else None
 
         message = ShivaMessage()
-        client = await ShivaClientAsync.create_and_connect(port=unused_tcp_port)
+        client = await ShivaClientAsync.create_and_connect(
+            host="127.0.0.1", port=unused_tcp_port
+        )
 
         with expectation:
             response = await client.send_message(message)
@@ -450,7 +458,9 @@ class TestShivaServer:
 
         server.wait_for_connections(forever=False, port=unused_tcp_port)
 
-        client = await ShivaClientAsync.create_and_connect(port=unused_tcp_port)
+        client = await ShivaClientAsync.create_and_connect(
+            host="127.0.0.1", port=unused_tcp_port
+        )
         good_response = await client.send_message(self.GOOD_MESSAGE)
         assert good_response == self.GOOD_MESSAGE
         if isinstance(server, ShivaServer):
@@ -472,7 +482,9 @@ class TestShivaServer:
 
         await server.wait_for_connections(forever=False, port=unused_tcp_port)
 
-        client = await ShivaClientAsync.create_and_connect(port=unused_tcp_port)
+        client = await ShivaClientAsync.create_and_connect(
+            host="127.0.0.1", port=unused_tcp_port
+        )
         good_response = await client.send_message(self.GOOD_MESSAGE)
         assert good_response == self.GOOD_MESSAGE
 
@@ -504,7 +516,9 @@ class TestShivaServer:
         server = ShivaServerAsync(on_new_message_callback=cb)
         await server.wait_for_connections(forever=False, port=unused_tcp_port)
 
-        client = await ShivaClientAsync.create_and_connect(port=unused_tcp_port)
+        client = await ShivaClientAsync.create_and_connect(
+            host="127.0.0.1", port=unused_tcp_port
+        )
 
         test_tensors = [
             # create one tensor for each supported dtype
@@ -654,7 +668,9 @@ class TestShivaBridge:
 
         server.wait_for_connections(forever=False, port=unused_tcp_port)
 
-        client = await ShivaClientAsync.create_and_connect(port=unused_tcp_port)
+        client = await ShivaClientAsync.create_and_connect(
+            host="127.0.0.1", port=unused_tcp_port
+        )
 
         person = TestShivaBridge.Person(
             name="Alice",
