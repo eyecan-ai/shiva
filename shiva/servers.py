@@ -189,26 +189,35 @@ class ShivaServerAsync:
         writer: asyncio.StreamWriter,
     ) -> None:
         async def reading_loop():
-            while True:
-                try:
-                    message = await ShivaMessage.receive_message_async(reader)
+            try:
+                while True:
+                    try:
+                        message = await ShivaMessage.receive_message_async(reader)
 
-                    response_message: ShivaMessage = (
-                        await self._on_new_message_callback(message)
-                    )
+                        response_message: ShivaMessage = (
+                            await self._on_new_message_callback(message)
+                        )
 
-                    await ShivaMessage.send_message_async(writer, response_message)
-                except OSError:
-                    if self._on_connection_lost is not None:
-                        self._on_connection_lost(writer.get_extra_info("peername"))
-                    break
-                except Exception as e:
-                    logger.error(
-                        f"{e.__class__.__name__}: {e.args[0] if e.args else ''}"
-                    )
-                    await ShivaMessage.send_message_async(writer, ShivaErrorMessage(e))
+                        await ShivaMessage.send_message_async(writer, response_message)
+                    except OSError:
+                        if self._on_connection_lost is not None:
+                            self._on_connection_lost(writer.get_extra_info("peername"))
+                        break
+                    except Exception as e:
+                        logger.error(
+                            f"{e.__class__.__name__}: {e.args[0] if e.args else ''}"
+                        )
+                        await ShivaMessage.send_message_async(
+                            writer, ShivaErrorMessage(e)
+                        )
 
-                await asyncio.sleep(0.0001)
+                    await asyncio.sleep(0.0001)
+            finally:
+                # Close the server side of the connection, both when the client
+                # disconnects and when the task is cancelled by close(). Since
+                # Python 3.12, Server.wait_closed() waits for all connections to be
+                # closed, so leaving them open would make close() hang forever.
+                writer.close()
 
         if self._on_new_connection is not None:
             self._on_new_connection(writer.get_extra_info("peername"))
@@ -231,7 +240,9 @@ class ShivaServerAsync:
             err = "Server is not running, did you forget to call wait_for_connections?"
             raise RuntimeError(err)
 
-        for task in self._tasks:
+        # Iterate over a copy, since each task removes itself from self._tasks
+        # when done (see the done callback in _on_connection_callback)
+        for task in list(self._tasks):
             task.cancel()
             try:
                 await task
